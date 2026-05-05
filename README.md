@@ -36,7 +36,7 @@ All commands below assume they are run from this repository root.
 python experiments/train.py \
   --config configs/mujuco/hopper.yaml \
   --condition diag_curvature \
-  --learning-rate 0.16 \
+  --learning-rate 0.02 \
   --seed 0 \
   --workers 8 \
   --output results/debug_diag_curvature_seed0
