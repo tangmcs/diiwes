@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+scripts/summarize.py
+job_outputs/
+results/
+figures/
