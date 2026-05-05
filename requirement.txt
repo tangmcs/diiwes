@@ -1,0 +1,6 @@
+# Requires Python 3.10+.
+numpy
+PyYAML
+gymnasium[mujoco,atari]
+ale-py
+AutoROM[accept-rom-license]
