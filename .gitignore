@@ -6,3 +6,4 @@ scripts/summarize.py
 job_outputs/
 results/
 figures/
+slurm/
