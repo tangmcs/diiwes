@@ -7,3 +7,5 @@ job_outputs/
 results/
 figures/
 slurm/
+plots/*.csv
+plots/README.md

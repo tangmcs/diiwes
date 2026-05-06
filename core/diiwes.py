@@ -528,8 +528,12 @@ class DIIWES(StandardES):
 
         w_max = float(np.max(weights))
         w_min = float(np.min(weights))
+        ratio_mean = float(np.mean(ratios))
+        ratio_min = float(np.min(ratios))
+        ratio_max = float(np.max(ratios))
         multiplier_mean = float(np.mean(multiplier))
         multiplier_std = float(np.std(multiplier))
+        step_norm_ratio = float(applied_step_norm / (no_curv_pre_trust_step_norm + 1e-12))
         info: dict[str, Any] = {
             "grad_norm": grad_norm,
             "grad_norm_before_clip": grad_norm_before_clip,
@@ -553,16 +557,32 @@ class DIIWES(StandardES):
             "buffer_size": int(len(self.sample_buffer)),
             "ess": ess,
             "ess_ratio": ess_ratio,
+            "ess_normalized": ess_ratio,
             "clip_frac": float(np.mean(clip_mask)),
+            "clip_fraction": float(np.mean(clip_mask)),
             "w_max": w_max,
             "w_min": w_min,
             "max_weight_ratio": float(w_max * batch_size),
+            "mean_importance_weight": ratio_mean,
+            "max_importance_weight": ratio_max,
+            "importance_weight_mean": ratio_mean,
+            "importance_weight_min": ratio_min,
+            "importance_weight_max": ratio_max,
             "used_replay": bool(used_replay),
             "hessian_pairs": int(n_hessian_pairs),
             "curv_mean": float(np.mean(curv)),
             "curv_max": float(np.max(curv)),
             "curv_min": float(np.min(curv)),
             "curvature_active_frac": float(np.mean(curv > 0.0)),
+            "explicit_step_norm": no_curv_pre_trust_step_norm,
+            "step_norm_ratio": step_norm_ratio,
+            "hessian_shrinkage_median": float(np.median(multiplier)),
+            "hessian_shrinkage_p90": float(np.percentile(multiplier, 90.0)),
+            "hessian_shrinkage_max": float(np.max(multiplier)),
+            "lambda": lam,
+            "sigma": sigma_target,
+            "learning_rate": alpha,
+            "reuse_fraction": float(self.reuse_fraction),
             "step_multiplier_mean": multiplier_mean,
             "step_multiplier_std": multiplier_std,
             "step_multiplier_cv": float(multiplier_std / (multiplier_mean + 1e-12)),

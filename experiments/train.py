@@ -247,7 +247,7 @@ def _scale_obs(obs: Any, obs_scale: float) -> np.ndarray:
     return obs_array
 
 
-def _evaluate_params(task: tuple[np.ndarray, int, Any, Any, bool, float]) -> tuple[float, list[np.ndarray]]:
+def _evaluate_params(task: tuple[np.ndarray, int, Any, Any, bool, float]) -> tuple[float, list[np.ndarray], int]:
     params, rollout_seed, obs_mean, obs_var, collect_obs, obs_scale = task
     obs, _ = _WORKER_ENV.reset(seed=int(rollout_seed))
     if hasattr(_WORKER_ENV.action_space, "seed"):
@@ -255,6 +255,7 @@ def _evaluate_params(task: tuple[np.ndarray, int, Any, Any, bool, float]) -> tup
 
     observations: list[np.ndarray] = []
     total_reward = 0.0
+    steps = 0
     for _ in range(_WORKER_MAX_STEPS):
         obs_scaled = _scale_obs(obs, obs_scale)
         if obs_mean is not None and obs_var is not None:
@@ -265,12 +266,13 @@ def _evaluate_params(task: tuple[np.ndarray, int, Any, Any, bool, float]) -> tup
         if hasattr(_WORKER_ENV.action_space, "low"):
             action = np.clip(action, _WORKER_ENV.action_space.low, _WORKER_ENV.action_space.high)
         obs, reward, terminated, truncated, _ = _WORKER_ENV.step(action)
+        steps += 1
         total_reward += float(reward)
         if collect_obs:
             observations.append(_scale_obs(obs, obs_scale).copy())
         if terminated or truncated:
             break
-    return total_reward, observations
+    return total_reward, observations, steps
 
 
 def _condition_config(config: dict[str, Any], condition: str) -> dict[str, Any]:
@@ -368,7 +370,13 @@ def _history_record(
     info: dict[str, Any],
     learning_rate: float,
     elapsed: float,
+    train_env_steps: int,
+    train_env_steps_iter: int,
+    eval_env_steps: int,
+    eval_env_steps_iter: int,
 ) -> dict[str, Any]:
+    total_env_steps = int(train_env_steps) + int(eval_env_steps)
+    total_env_steps_iter = int(train_env_steps_iter) + int(eval_env_steps_iter)
     record = {
         "iteration": int(iteration),
         "eval_reward": float(eval_reward),
@@ -385,6 +393,14 @@ def _history_record(
         "step_norm": float(info.get("step_norm", 0.0)),
         "lr": float(learning_rate),
         "time": float(elapsed),
+        "env_steps": int(train_env_steps),
+        "env_steps_iter": int(train_env_steps_iter),
+        "train_env_steps": int(train_env_steps),
+        "train_env_steps_iter": int(train_env_steps_iter),
+        "eval_env_steps": int(eval_env_steps),
+        "eval_env_steps_iter": int(eval_env_steps_iter),
+        "total_env_steps": total_env_steps,
+        "total_env_steps_iter": total_env_steps_iter,
     }
     for key, value in info.items():
         if key in record:
@@ -477,6 +493,8 @@ def train(
     best_fitness_so_far = -np.inf
     best_params = params.copy()
     last_eval_reward = -np.inf
+    train_env_steps = 0
+    eval_env_steps = 0
 
     try:
         for iteration in range(n_iterations):
@@ -501,19 +519,25 @@ def train(
                 fresh_tasks.append((theta_eval, rollout_seed, obs_mean, obs_var, obs_normalizer is not None, obs_scale))
             fresh_results = pool.map(_evaluate_params, fresh_tasks) if fresh_tasks else []
             fresh_fitness = np.asarray([result[0] for result in fresh_results], dtype=np.float64)
+            train_env_steps_iter = int(sum(result[2] for result in fresh_results))
+            train_env_steps += train_env_steps_iter
 
             if obs_normalizer is not None and fresh_results:
-                observations = [obs for _, rollout_obs in fresh_results for obs in rollout_obs]
+                observations = [obs for _, rollout_obs, _ in fresh_results for obs in rollout_obs]
                 if observations:
                     obs_normalizer.update_batch(np.asarray(observations, dtype=np.float64))
 
             center_fitness = None
+            center_env_steps_iter = 0
             if evaluate_center_fitness:
                 center = pool.map(
                     _evaluate_params,
                     [(params.copy(), seed + 900_000 + iteration, obs_mean, obs_var, False, obs_scale)],
                 )
                 center_fitness = float(center[0][0])
+                center_env_steps_iter = int(center[0][2])
+                train_env_steps_iter += center_env_steps_iter
+                train_env_steps += center_env_steps_iter
 
             params, info = optimizer.tell(
                 params,
@@ -528,6 +552,7 @@ def train(
             best_fitness_so_far = max(best_fitness_so_far, best_fitness_iter)
 
             should_eval = iteration % eval_interval == 0 or iteration == n_iterations - 1
+            eval_env_steps_iter = 0
             if should_eval:
                 eval_tasks = []
                 for eval_idx in range(eval_episodes):
@@ -538,6 +563,8 @@ def train(
                     eval_tasks.append((params.copy(), rollout_seed, obs_mean, obs_var, False, obs_scale))
                 eval_results = pool.map(_evaluate_params, eval_tasks)
                 last_eval_reward = float(np.mean([result[0] for result in eval_results]))
+                eval_env_steps_iter = int(sum(result[2] for result in eval_results))
+                eval_env_steps += eval_env_steps_iter
                 if last_eval_reward > best_reward:
                     best_reward = last_eval_reward
                     best_params = params.copy()
@@ -553,6 +580,10 @@ def train(
                 info,
                 optimizer.learning_rate,
                 elapsed,
+                train_env_steps,
+                train_env_steps_iter,
+                eval_env_steps,
+                eval_env_steps_iter,
             )
             history.append(record)
 
