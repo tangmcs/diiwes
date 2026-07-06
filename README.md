@@ -5,13 +5,13 @@ This repository contains the reference implementation for the DIIWES paper exper
 ## Repository Layout
 
 - `core/`: optimizer and policy code.
-  - `diiwes.py`: final `DIIWES` optimizer with importance weighting, raw-fitness Stein curvature, leave-one-out curvature baseline, optional EMA bias correction, and trust-radius clipping.
-  - `standard_es.py`: OpenAI-style ES baseline with rank fitness.
+  - `diiwes.py`: final `DIIWES` optimizer with importance weighting, raw-return Stein curvature by default, optional standardized-curvature checks, leave-one-out curvature baseline, optional EMA bias correction, and trust-radius clipping.
+  - `standard_es.py`: OpenAI-style ES baseline with rank fitness and optional trust-radius clipping.
   - `policies.py`: NumPy MLP policies and layer-slice helpers.
 - `utilities/`: shared utilities such as observation normalization.
 - `experiments/`: runnable training entry points.
 - `configs/`: experiment configuration files, split into `configs/mujuco/` and `configs/atari/`.
-- `plots/`: reserved for paper figure-generation scripts.
+- `plots/`: paper figures and generated table fragments.
 
 Generated outputs live in `results/` and `job_outputs/`; both are ignored by git.
 
@@ -20,13 +20,24 @@ Generated outputs live in `results/` and `job_outputs/`; both are ignored by git
 The trainer exposes the optimizer comparisons used by the experiments:
 
 - `standard_es`
+- `standard_es_trust`
 - `no_curvature`
 - `diag_curvature`
+- `global_curvature`
+- `block_curvature`
+- `directional_curvature`
+- `normalized_diag_curvature`
+- `normalized_block_curvature`
 
 The clean comparisons are:
 
 - `diag_curvature` vs `no_curvature`: evaluates whether diagonal curvature improves the semi-implicit replay/trust optimizer.
 - `standard_es`: plain ES baseline.
+- `standard_es_trust`: standard ES with the same trust-radius clipping interface.
+
+By default, DIIWES estimates Stein curvature on the raw return scale. Use
+`--curvature-fitness standardized` only for compatibility checks against the
+older standardized-return estimator.
 
 ## Paper Result Artifacts
 
