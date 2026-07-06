@@ -28,6 +28,63 @@ The clean comparisons are:
 - `diag_curvature` vs `no_curvature`: evaluates whether diagonal curvature improves the semi-implicit replay/trust optimizer.
 - `standard_es`: plain ES baseline.
 
+## Paper Result Artifacts
+
+The current balanced MuJoCo learning-rate sweep is exported as a long-format
+table and then summarized into LaTeX fragments and figures for the paper.
+
+```bash
+python scripts/export_plot_table.py \
+  results/mujoco_lr_sweep_46638567 \
+  --output plots/mujoco_lr_sweep_46638567_plot_table.csv
+
+python scripts/analyze_mujoco_results.py \
+  --input plots/mujoco_lr_sweep_46638567_plot_table.csv \
+  --out-dir plots \
+  --env-step-lr 0.02
+```
+
+The analysis command writes:
+
+- `plots/mujoco_experiments_section_draft.tex`
+- `plots/mujoco_best_return_table.tex`
+- `plots/mujoco_robustness_table.tex`
+- `plots/mujoco_diagnostics_summary.tex`
+- `plots/mujoco_env_step_learning_curves_lr0p02.{png,pdf}`
+
+The no-curvature ablation needed to isolate the diagonal Stein-curvature term
+can be launched as a separate Slurm array:
+
+```bash
+sbatch slurm/mujoco_no_curvature_lr_sweep.sh
+```
+
+Direct shell execution of that Slurm script defaults to a dry run; set
+`PAPER_DRY_RUN=0` only when intentionally running one local task.
+
+After the array finishes, export its histories with the existing collector:
+
+```bash
+PAPER_OUTPUT_ROOT=results/mujoco_no_curvature_lr_sweep_<jobid> \
+PAPER_PLOT_OUTPUT=plots/mujoco_no_curvature_lr_sweep_<jobid>_plot_table.csv \
+sbatch slurm/collect_mujoco_lr_sweep.sh
+```
+
+Then regenerate the paper artifacts by merging the main sweep and the
+no-curvature ablation sweep:
+
+```bash
+python scripts/analyze_mujoco_results.py \
+  --input plots/mujoco_lr_sweep_46638567_plot_table.csv \
+  --input plots/mujoco_no_curvature_lr_sweep_<jobid>_plot_table.csv \
+  --out-dir plots \
+  --env-step-lr 0.02
+```
+
+When the merged table contains `DIIWES-no-H`, the analysis script also writes
+`plots/mujoco_hessian_ablation_lr_robustness.{png,pdf}` and includes the
+Hessian-ablation figure in `plots/mujoco_experiments_section_draft.tex`.
+
 ## Local Execution
 
 All commands below assume they are run from this repository root.

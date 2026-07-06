@@ -2,10 +2,14 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 tests/
+Problem_to_fix/
+plots/
 scripts/summarize.py
+scripts/analyze_mujoco_results.py
 job_outputs/
 results/
 figures/
+analysis/
 slurm/
 plots/*.csv
 plots/README.md

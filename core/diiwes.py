@@ -2,10 +2,13 @@
 
 Design choices kept explicit:
   - rank-shaped fitness is used only for the ES gradient;
-  - Stein curvature uses raw fitness standardized on the fresh population;
+  - Stein curvature uses raw return units by default;
+  - standardized curvature fitness remains available for compatibility checks;
   - no-center curvature uses a leave-one-out pair baseline;
   - curvature EMA is bias-corrected before forming the step denominator;
-  - trust-radius clipping is part of the DIIWES update.
+  - trust-radius clipping is part of the DIIWES update;
+  - global, block, directional, and normalized curvature variants are
+    available for low-variance Hessian debugging.
 """
 
 from __future__ import annotations
@@ -32,7 +35,7 @@ class BufferEntry:
 
 
 class DIIWES(StandardES):
-    """Semi-implicit ES with rank gradients and raw-fitness Stein curvature."""
+    """Semi-implicit ES with rank gradients and raw-return Stein curvature."""
 
     def __init__(
         self,
@@ -56,7 +59,9 @@ class DIIWES(StandardES):
         seed: int | None = None,
         *,
         use_curvature: bool = True,
+        curvature_fitness: str = "raw",
         curvature_mode: str = "diag",
+        curvature_step_mode: str = "dampen",
         curvature_beta: float = 0.99,    # What is the meaning of curvature_beta? 
         curvature_clip: float = 1e3,
         min_step_multiplier: float = 0.05,  # What is the meaning of min_step_multiplier
@@ -93,9 +98,15 @@ class DIIWES(StandardES):
         if not (0.0 <= ess_min_ratio <= 1.0):
             raise ValueError("ess_min_ratio must be in [0, 1]")
 
+        curvature_fitness = str(curvature_fitness).lower()
+        if curvature_fitness not in {"raw", "standardized"}:
+            raise ValueError("curvature_fitness must be one of raw, standardized")
         curvature_mode = str(curvature_mode).lower()
-        if curvature_mode not in {"global", "block", "diag"}:
-            raise ValueError("curvature_mode must be one of global, block, diag")
+        if curvature_mode not in {"global", "block", "diag", "directional"}:
+            raise ValueError("curvature_mode must be one of global, block, diag, directional")
+        curvature_step_mode = str(curvature_step_mode).lower()
+        if curvature_step_mode not in {"dampen", "normalized"}:
+            raise ValueError("curvature_step_mode must be one of dampen, normalized")
 
         self.buffer_size = int(buffer_size)
         self.reuse_fraction = float(reuse_fraction)
@@ -106,7 +117,9 @@ class DIIWES(StandardES):
         self.buffer_sampling = str(buffer_sampling).lower()
         self.elite_quantile = float(elite_quantile) #What is the meaning of elite_quantile
         self.use_curvature = bool(use_curvature)
+        self.curvature_fitness = curvature_fitness
         self.curvature_mode = curvature_mode
+        self.curvature_step_mode = curvature_step_mode
         self.curvature_beta = float(curvature_beta)
         self.curvature_clip = float(curvature_clip)
         self.min_step_multiplier = float(min_step_multiplier)
@@ -304,7 +317,7 @@ class DIIWES(StandardES):
             return full
         raise ValueError(f"fitness length must be {batch_size} or {n_fresh}, got {len(fit)}")
     # The following code is used to estimate the curvature. 
-    # center_f_norm is the normalized fitness of the current center parameters.
+    # center_f_for_curv is the center fitness on the same scale used for curvature.
     # Check the outliers of the fitness value and the normalized fitness value, particularly for the reused samples.
     def _estimate_fresh_curvature(
         self,
@@ -312,7 +325,8 @@ class DIIWES(StandardES):
         f: np.ndarray,
         ask_info: dict[str, Any] | None,
         sigma: float,
-        center_f_norm: float | None = None,
+        center_f_for_curv: float | None = None,
+        direction: np.ndarray | None = None,
     ) -> tuple[np.ndarray | None, int]:
         if ask_info is None:
             return None, 0
@@ -327,8 +341,8 @@ class DIIWES(StandardES):
         eps = np.asarray(noise[plus], dtype=np.float64)
         s_pair = np.asarray(f[plus] + f[minus], dtype=np.float64)
 
-        if center_f_norm is not None:
-            pair_signal = s_pair - 2.0 * float(center_f_norm)
+        if center_f_for_curv is not None:
+            pair_signal = s_pair - 2.0 * float(center_f_for_curv)
             baseline_mode = "center"
         elif self.use_leave_one_out_curvature_baseline and n_pairs > 1:
             loo_mean = (float(np.sum(s_pair)) - s_pair) / float(n_pairs - 1)
@@ -348,6 +362,19 @@ class DIIWES(StandardES):
             h_raw = np.mean(pair_signal[:, None] * (eps * eps - 1.0), axis=0)
             h_raw /= 2.0 * sigma_sq + 1e-12
             return h_raw.astype(np.float64), n_pairs
+
+        if self.curvature_mode == "directional":
+            if direction is None:
+                return None, 0
+            u = np.asarray(direction, dtype=np.float64)
+            u_norm = float(np.linalg.norm(u))
+            if u_norm <= 1e-12 or not np.isfinite(u_norm):
+                return None, 0
+            u = u / u_norm
+            proj = eps @ u
+            h_scalar = np.mean(pair_signal * (proj * proj - 1.0))
+            h_scalar /= 2.0 * sigma_sq + 1e-12
+            return np.full(self.num_params, h_scalar, dtype=np.float64), n_pairs
 
         if self.curvature_mode == "global":
             d = eps.shape[1]
@@ -415,13 +442,18 @@ class DIIWES(StandardES):
         ref = fitness_raw[fresh_mask] if np.any(fresh_mask) else fitness_raw
         fit_mean = float(np.mean(ref))
         fit_std = float(np.std(ref) + 1e-8)
-        f_for_curv = (fitness_raw - fit_mean) / fit_std
+        f_standardized = (fitness_raw - fit_mean) / fit_std
+        if self.curvature_fitness == "raw":
+            f_for_curv = fitness_raw
+        else:
+            f_for_curv = f_standardized
         if self.rank_fitness:
             f_for_grad = centered_ranks(fitness_raw)
-            fitness_transform = "rank_gradient_raw_curvature"
+            gradient_transform = "rank_gradient"
         else:
-            f_for_grad = f_for_curv
-            fitness_transform = "standardized_gradient_raw_curvature"
+            f_for_grad = f_standardized
+            gradient_transform = "standardized_gradient"
+        fitness_transform = f"{gradient_transform}_{self.curvature_fitness}_curvature"
 
         sigma_target = float(self.noise_std)
         sigma_old = np.full(batch_size, sigma_target, dtype=np.float64)
@@ -449,8 +481,10 @@ class DIIWES(StandardES):
         # ratio_sum is there to normalize the unnormalized importance ratios into weights that sum to 1.
         # For reused samples, each ratio says: "how plausible is this old sample under the current search distribution compared with the distribution that originally generated it?" Normalizing by the sum turns those plausibilities into relative contributions across the whole batch.
         ratio_sum = float(np.sum(ratios))
+        importance_ratio_fallback = False
         # The following condition is used to prevent some bad numerical instability
         if ratio_sum <= 0.0 or not np.isfinite(ratio_sum):
+            importance_ratio_fallback = True
             # This is similar to the standard evolution strategy with the only different that the following includes some reused samples with uniform weights while for the standard evolution strategies, all the perturbations are freshly sampled and evaluated.
             weights = np.full(batch_size, 1.0 / batch_size, dtype=np.float64)
         else:
@@ -458,7 +492,7 @@ class DIIWES(StandardES):
 
         ess = float(1.0 / (np.sum(weights * weights) + 1e-12))
         ess_ratio = float(ess / batch_size)
-        used_replay = True
+        used_replay = n_reused > 0
         if ess_ratio < self.ess_min_ratio and n_fresh > 0:
             used_replay = False
             weights = np.zeros(batch_size, dtype=np.float64)
@@ -482,9 +516,12 @@ class DIIWES(StandardES):
             grad = grad * (self.max_grad_norm / (grad_norm_before_clip + 1e-12))
         grad_norm = float(np.linalg.norm(grad))
 
-        center_f_norm = None
+        center_f_for_curv = None
         if center_fitness is not None:
-            center_f_norm = (float(center_fitness) - fit_mean) / fit_std
+            if self.curvature_fitness == "raw":
+                center_f_for_curv = float(center_fitness)
+            else:
+                center_f_for_curv = (float(center_fitness) - fit_mean) / fit_std
 
         h_raw, n_hessian_pairs = None, 0
         if self.use_curvature:
@@ -493,7 +530,8 @@ class DIIWES(StandardES):
                 f=f_for_curv,
                 ask_info=ask_info,
                 sigma=sigma_target,
-                center_f_norm=center_f_norm,
+                center_f_for_curv=center_f_for_curv,
+                direction=grad,
             )
         if h_raw is not None:
             # ema is a smoothed running estimate of that curvature
@@ -515,12 +553,28 @@ class DIIWES(StandardES):
             curv = np.clip(curv, 0.0, self.curvature_clip)
         else:
             curv = np.zeros_like(grad)
-        if self.l2_coeff > 0.0:
+        if self.l2_coeff > 0.0 and self.curvature_step_mode == "dampen":
             curv = curv + self.l2_coeff
 
-        denom = 1.0 + alpha * lam + alpha * curv
-        multiplier = 1.0 / np.maximum(denom, 1e-12)
-        multiplier = np.clip(multiplier, self.min_step_multiplier, 1.0)
+        if self.curvature_step_mode == "normalized" and self.use_curvature:
+            base_denom = 1.0 + alpha * lam
+            if self.l2_coeff > 0.0:
+                base_denom += alpha * self.l2_coeff
+            base_multiplier = float(np.clip(1.0 / max(base_denom, 1e-12), self.min_step_multiplier, 1.0))
+            preconditioner = 1.0 / np.sqrt(1.0 + alpha * curv)
+            preconditioner_rms = float(np.sqrt(np.mean(preconditioner * preconditioner)) + 1e-12)
+            preconditioner = preconditioner / preconditioner_rms
+            if self.min_step_multiplier > 0.0:
+                preconditioner = np.clip(
+                    preconditioner,
+                    self.min_step_multiplier,
+                    1.0 / max(self.min_step_multiplier, 1e-12),
+                )
+            multiplier = base_multiplier * preconditioner
+        else:
+            denom = 1.0 + alpha * lam + alpha * curv
+            multiplier = 1.0 / np.maximum(denom, 1e-12)
+            multiplier = np.clip(multiplier, self.min_step_multiplier, 1.0)
         step_pre_trust = alpha * multiplier * grad
         pre_trust_step_norm = float(np.linalg.norm(step_pre_trust))
 
@@ -562,6 +616,18 @@ class DIIWES(StandardES):
         ratio_mean = float(np.mean(ratios))
         ratio_min = float(np.min(ratios))
         ratio_max = float(np.max(ratios))
+        replay_weight_mass = float(np.sum(weights[is_reused])) if n_reused else 0.0
+        fresh_weight_mass = float(np.sum(weights[fresh_mask])) if n_fresh else 0.0
+        replay_ratio_mean = float(np.mean(ratios[is_reused])) if n_reused else 0.0
+        replay_ratio_min = float(np.min(ratios[is_reused])) if n_reused else 0.0
+        replay_ratio_max = float(np.max(ratios[is_reused])) if n_reused else 0.0
+        fresh_ratio_mean = float(np.mean(ratios[fresh_mask])) if n_fresh else 0.0
+        replay_weight_mean = float(np.mean(weights[is_reused])) if n_reused else 0.0
+        replay_weight_max = float(np.max(weights[is_reused])) if n_reused else 0.0
+        fresh_weight_mean = float(np.mean(weights[fresh_mask])) if n_fresh else 0.0
+        fresh_weight_max = float(np.max(weights[fresh_mask])) if n_fresh else 0.0
+        replay_clip_frac = float(np.mean(clip_mask[is_reused])) if n_reused else 0.0
+        fresh_clip_frac = float(np.mean(clip_mask[fresh_mask])) if n_fresh else 0.0
         multiplier_mean = float(np.mean(multiplier))
         multiplier_std = float(np.std(multiplier))
         step_norm_ratio = float(applied_step_norm / (no_curv_pre_trust_step_norm + 1e-12))
@@ -600,6 +666,19 @@ class DIIWES(StandardES):
             "importance_weight_min": ratio_min,
             "importance_weight_max": ratio_max,
             "used_replay": bool(used_replay),
+            "importance_ratio_fallback": bool(importance_ratio_fallback),
+            "replay_weight_mass": replay_weight_mass,
+            "fresh_weight_mass": fresh_weight_mass,
+            "replay_ratio_mean": replay_ratio_mean,
+            "replay_ratio_min": replay_ratio_min,
+            "replay_ratio_max": replay_ratio_max,
+            "fresh_ratio_mean": fresh_ratio_mean,
+            "replay_weight_mean": replay_weight_mean,
+            "replay_weight_max": replay_weight_max,
+            "fresh_weight_mean": fresh_weight_mean,
+            "fresh_weight_max": fresh_weight_max,
+            "replay_clip_frac": replay_clip_frac,
+            "fresh_clip_frac": fresh_clip_frac,
             "hessian_pairs": int(n_hessian_pairs),
             "curv_mean": float(np.mean(curv)),
             "curv_max": float(np.max(curv)),
@@ -622,6 +701,10 @@ class DIIWES(StandardES):
             "multiplier_floor_frac": float(np.mean(multiplier <= self.min_step_multiplier + 1e-12)),
             "fitness_transform": fitness_transform,
             "curvature_baseline": self._last_curvature_baseline_mode,
+            "curvature_fitness": self.curvature_fitness,
+            "curvature_return_std": fit_std,
+            "curvature_mode": self.curvature_mode,
+            "curvature_step_mode": self.curvature_step_mode,
             "hessian_ema_count": int(self.hessian_ema_count),
             "converged": True,
             "residual": 0.0,

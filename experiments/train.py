@@ -24,8 +24,14 @@ from utilities import ObsNormalizer
 
 CONDITIONS = {
     "standard_es",
+    "standard_es_trust",
     "no_curvature",
     "diag_curvature",
+    "global_curvature",
+    "block_curvature",
+    "directional_curvature",
+    "normalized_diag_curvature",
+    "normalized_block_curvature",
 }
 
 _WORKER_ENV = None
@@ -281,6 +287,10 @@ def _condition_config(config: dict[str, Any], condition: str) -> dict[str, Any]:
 
     if condition == "standard_es":
         config["algorithm"] = "standard_es"
+        config["use_trust_radius_for_standard_es"] = False
+    elif condition == "standard_es_trust":
+        config["algorithm"] = "standard_es"
+        config["use_trust_radius_for_standard_es"] = True
     elif condition == "no_curvature":
         config["algorithm"] = "semi_implicit_curvature_es"
         config["use_curvature"] = False
@@ -289,8 +299,38 @@ def _condition_config(config: dict[str, Any], condition: str) -> dict[str, Any]:
         config["algorithm"] = "semi_implicit_curvature_es"
         config["use_curvature"] = True
         config["curvature_mode"] = "diag"
+        config["curvature_step_mode"] = "dampen"
+    elif condition == "global_curvature":
+        config["algorithm"] = "semi_implicit_curvature_es"
+        config["use_curvature"] = True
+        config["curvature_mode"] = "global"
+        config["curvature_step_mode"] = "dampen"
+    elif condition == "block_curvature":
+        config["algorithm"] = "semi_implicit_curvature_es"
+        config["use_curvature"] = True
+        config["curvature_mode"] = "block"
+        config["block_structure"] = "layer"
+        config["curvature_step_mode"] = "dampen"
+    elif condition == "directional_curvature":
+        config["algorithm"] = "semi_implicit_curvature_es"
+        config["use_curvature"] = True
+        config["curvature_mode"] = "directional"
+        config["curvature_step_mode"] = "dampen"
+    elif condition == "normalized_diag_curvature":
+        config["algorithm"] = "semi_implicit_curvature_es"
+        config["use_curvature"] = True
+        config["curvature_mode"] = "diag"
+        config["curvature_step_mode"] = "normalized"
+    elif condition == "normalized_block_curvature":
+        config["algorithm"] = "semi_implicit_curvature_es"
+        config["use_curvature"] = True
+        config["curvature_mode"] = "block"
+        config["block_structure"] = "layer"
+        config["curvature_step_mode"] = "normalized"
     else:
         raise ValueError(f"unknown condition: {condition}")
+    if config["algorithm"] == "semi_implicit_curvature_es":
+        config.setdefault("curvature_fitness", "raw")
     return config
 
 
@@ -311,6 +351,9 @@ def make_optimizer(
             rank_fitness=config.get("rank_fitness", True),
             max_grad_norm=config.get("max_grad_norm", 0.0),
             max_param_norm=config.get("max_param_norm", None),
+            trust_radius=config.get("trust_radius", None)
+            if config.get("use_trust_radius_for_standard_es", False)
+            else None,
             seed=seed,
         )
 
@@ -338,7 +381,9 @@ def make_optimizer(
         max_param_norm=config.get("max_param_norm", None),
         seed=seed,
         use_curvature=config.get("use_curvature", True),
+        curvature_fitness=config.get("curvature_fitness", "raw"),
         curvature_mode=config.get("curvature_mode", "diag"),
+        curvature_step_mode=config.get("curvature_step_mode", "dampen"),
         curvature_beta=config.get("curvature_beta", 0.99),
         curvature_clip=config.get("curvature_clip", 1e3),
         min_step_multiplier=config.get("min_step_multiplier", 0.05),
@@ -455,6 +500,7 @@ def train(
 
     optimizer = make_optimizer(config, policy.num_params, policy, seed)
     use_curvature = bool(getattr(optimizer, "use_curvature", False))
+    curvature_fitness = str(getattr(optimizer, "curvature_fitness", "none"))
     curvature_mode = str(getattr(optimizer, "curvature_mode", "none"))
     trust_radius = getattr(optimizer, "trust_radius", None)
 
@@ -483,7 +529,8 @@ def train(
         print(f"Policy: {policy.__class__.__name__}, {policy.num_params} parameters", flush=True)
         print(
             f"Optimizer: algorithm={config['algorithm']} | curvature={use_curvature} | "
-            f"mode={curvature_mode} | trust_radius={trust_radius} | lr={base_lr}",
+            f"mode={curvature_mode} | curvature_fitness={curvature_fitness} | "
+            f"trust_radius={trust_radius} | lr={base_lr}",
             flush=True,
         )
 
@@ -611,14 +658,58 @@ def train(
     return best_reward, best_params
 
 
+def _parse_optional_float(value: str) -> float | None:
+    text = str(value).strip().lower()
+    if text in {"none", "null", "off", "false"}:
+        return None
+    return float(value)
+
+
+def _parse_bool(value: str) -> bool:
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"expected boolean value, got {value!r}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--condition", required=True, choices=sorted(CONDITIONS))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--learning-rate", type=float, default=None)
-    parser.add_argument("--trust-radius", type=float, default=None)
+    parser.add_argument(
+        "--trust-radius",
+        type=str,
+        default=None,
+        help="Override trust radius. Use 'none' to disable trust clipping.",
+    )
     parser.add_argument("--reuse-fraction", type=float, default=None)
+    parser.add_argument("--implicit-damping", type=float, default=None)
+    parser.add_argument(
+        "--curvature-mode",
+        choices=("diag", "global", "block", "directional"),
+        default=None,
+        help="Override the curvature estimator for DIIWES variants.",
+    )
+    parser.add_argument(
+        "--curvature-step-mode",
+        choices=("dampen", "normalized"),
+        default=None,
+        help="Use either shrink-only damping or RMS-normalized curvature preconditioning.",
+    )
+    parser.add_argument("--curvature-beta", type=float, default=None)
+    parser.add_argument(
+        "--curvature-fitness",
+        choices=("raw", "standardized"),
+        default=None,
+        help="Fitness scale used by the Stein curvature estimator.",
+    )
+    parser.add_argument("--evaluate-center-fitness", type=_parse_bool, default=None)
+    parser.add_argument("--bias-correct-curvature-ema", type=_parse_bool, default=None)
+    parser.add_argument("--leave-one-out-curvature-baseline", type=_parse_bool, default=None)
     parser.add_argument(
         "--rank-fitness",
         choices=("true", "false"),
@@ -632,17 +723,35 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
+    config = _condition_config(config, args.condition)
     if args.learning_rate is not None:
         config["learning_rate"] = float(args.learning_rate)
     if args.trust_radius is not None:
-        config["trust_radius"] = float(args.trust_radius)
+        config["trust_radius"] = _parse_optional_float(args.trust_radius)
     if args.reuse_fraction is not None:
         config["reuse_fraction"] = float(args.reuse_fraction)
+    if args.implicit_damping is not None:
+        config["implicit_damping"] = float(args.implicit_damping)
+    if args.curvature_mode is not None:
+        config["curvature_mode"] = args.curvature_mode
+        if args.curvature_mode == "block":
+            config.setdefault("block_structure", "layer")
+    if args.curvature_step_mode is not None:
+        config["curvature_step_mode"] = args.curvature_step_mode
+    if args.curvature_beta is not None:
+        config["curvature_beta"] = float(args.curvature_beta)
+    if args.curvature_fitness is not None:
+        config["curvature_fitness"] = args.curvature_fitness
+    if args.evaluate_center_fitness is not None:
+        config["evaluate_center_fitness"] = bool(args.evaluate_center_fitness)
+    if args.bias_correct_curvature_ema is not None:
+        config["bias_correct_curvature_ema"] = bool(args.bias_correct_curvature_ema)
+    if args.leave_one_out_curvature_baseline is not None:
+        config["use_leave_one_out_curvature_baseline"] = bool(args.leave_one_out_curvature_baseline)
     if args.rank_fitness is not None:
         config["rank_fitness"] = args.rank_fitness == "true"
     if args.iterations is not None:
         config["n_iterations"] = int(args.iterations)
-    config = _condition_config(config, args.condition)
 
     if args.workers is None:
         n_workers = max(1, len(os.sched_getaffinity(0)) - 2)

@@ -48,6 +48,7 @@ class StandardES:
         rank_fitness: bool = True,
         max_grad_norm: float = 0.0,
         max_param_norm: float | None = None,
+        trust_radius: float | None = None,
         seed: int | None = None,
     ) -> None:
         self.num_params = int(num_params)
@@ -59,6 +60,7 @@ class StandardES:
         self.rank_fitness = bool(rank_fitness)
         self.max_grad_norm = float(max_grad_norm)
         self.max_param_norm = None if max_param_norm is None else float(max_param_norm)
+        self.trust_radius = None if trust_radius is None else float(trust_radius)
         if self.num_params <= 0:
             raise ValueError("num_params must be positive")
         if self.population_size <= 0:
@@ -67,6 +69,8 @@ class StandardES:
             raise ValueError("noise_std must be positive")
         if self.max_param_norm is not None and self.max_param_norm <= 0.0:
             raise ValueError("max_param_norm must be positive when provided")
+        if self.trust_radius is not None and self.trust_radius <= 0.0:
+            raise ValueError("trust_radius must be positive when provided")
 
         self.rng = np.random.RandomState(seed)
         self.iteration = 0
@@ -137,6 +141,17 @@ class StandardES:
         step = self._sgd_step(grad)
         if self.l2_coeff > 0.0:
             step = step - self.learning_rate * self.l2_coeff * theta_t
+        pre_trust_step_norm = float(np.linalg.norm(step))
+        trust_active = False
+        trust_scale = 1.0
+        if (
+            self.trust_radius is not None
+            and pre_trust_step_norm > self.trust_radius
+            and pre_trust_step_norm > 1e-12
+        ):
+            trust_active = True
+            trust_scale = float(self.trust_radius / pre_trust_step_norm)
+            step = step * trust_scale
 
         theta = theta_t + step
         if self.max_param_norm is not None:
@@ -153,6 +168,9 @@ class StandardES:
             "param_norm": float(np.linalg.norm(theta)),
             "param_change": float(np.linalg.norm(theta - theta_t)),
             "step_norm": float(np.linalg.norm(theta - theta_t)),
+            "pre_trust_step_norm": pre_trust_step_norm,
+            "trust_active": bool(trust_active),
+            "trust_scale": trust_scale,
             "mean_fitness": float(np.mean(fitness)),
             "std_fitness": float(np.std(fitness)),
             "max_fitness": float(np.max(fitness)),
