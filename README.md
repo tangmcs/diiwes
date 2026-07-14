@@ -35,6 +35,19 @@ The clean comparisons are:
 - `standard_es`: plain ES baseline.
 - `standard_es_trust`: standard ES with the same trust-radius clipping interface.
 
+## Mentor-requested no-trust Hessian rerun
+
+The focused Hopper rerun compares only the original `main` conditions
+`standard_es` and `diag_curvature`. It explicitly disables the trust radius
+and applies the decreasing sequences `alpha_0 / sqrt(t + 1)` and
+`alpha_0 / (t + 1)` for `alpha_0` in `{10, 30}`. The Standard ES arm is kept
+as the required matched control; Picard, replacement Hessian solvers, trust
+variants, and optimizer-development arms are excluded.
+
+See [the locked protocol](docs/hopper_main_hessian_no_trust_protocol.md), the
+Slurm launcher `scripts/submit_hopper_main_hessian_no_trust.sh`, and the strict
+validator `scripts/summarize_hopper_hessian_no_trust.py`.
+
 By default, DIIWES estimates Stein curvature on the raw return scale. Use
 `--curvature-fitness standardized` only for compatibility checks against the
 older standardized-return estimator.

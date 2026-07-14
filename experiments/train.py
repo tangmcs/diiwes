@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 import time
 from collections import deque
 from multiprocessing import Pool
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -34,6 +36,8 @@ CONDITIONS = {
     "normalized_block_curvature",
 }
 
+LR_SCHEDULES = {"constant", "exponential", "inverse_linear", "inverse_sqrt"}
+
 _WORKER_ENV = None
 _WORKER_POLICY = None
 _WORKER_MAX_STEPS = None
@@ -45,6 +49,63 @@ def load_config(path: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     return {} if config is None else dict(config)
+
+
+def learning_rate_at_iteration(
+    initial_learning_rate: float,
+    iteration: int,
+    schedule: str = "exponential",
+    decay: float = 1.0,
+) -> float:
+    """Resolve the scalar step size without changing optimizer semantics."""
+    alpha0 = float(initial_learning_rate)
+    step = int(iteration)
+    name = str(schedule).lower()
+    if not np.isfinite(alpha0) or alpha0 <= 0.0:
+        raise ValueError("initial_learning_rate must be finite and positive")
+    if step < 0:
+        raise ValueError("iteration must be nonnegative")
+    if name not in LR_SCHEDULES:
+        raise ValueError(f"unknown learning-rate schedule: {schedule}")
+    if name == "constant":
+        return alpha0
+    if name == "exponential":
+        gamma = float(decay)
+        if not np.isfinite(gamma) or gamma <= 0.0:
+            raise ValueError("lr_decay must be finite and positive")
+        return float(alpha0 * (gamma**step))
+    if name == "inverse_linear":
+        return float(alpha0 / (step + 1.0))
+    return float(alpha0 / np.sqrt(step + 1.0))
+
+
+def _source_digest(config_path: str) -> str:
+    """Hash the exact optimizer/trainer/config inputs used by a run."""
+    root = Path(__file__).resolve().parents[1]
+    config = Path(config_path).resolve()
+    source_paths = [
+        root / "core" / "__init__.py",
+        root / "core" / "diiwes.py",
+        root / "core" / "policies.py",
+        root / "core" / "standard_es.py",
+        root / "experiments" / "train.py",
+        root / "utilities" / "__init__.py",
+        root / "utilities" / "obs_norm.py",
+        config,
+    ]
+    digest = hashlib.sha256()
+    for path in source_paths:
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        try:
+            label = path.relative_to(root).as_posix()
+        except ValueError:
+            label = str(path)
+        digest.update(label.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _make_env(
@@ -514,6 +575,9 @@ def train(
     log_interval = int(config.get("log_interval", 10))
     base_lr = float(config.get("learning_rate", 0.02))
     lr_decay = float(config.get("lr_decay", 1.0))
+    lr_schedule = str(config.get("lr_schedule", "exponential")).lower()
+    if lr_schedule not in LR_SCHEDULES:
+        raise ValueError(f"unknown learning-rate schedule: {lr_schedule}")
     evaluate_center_fitness = bool(config.get("evaluate_center_fitness", False))
     common_rollout_seed = bool(config.get("common_rollout_seed", False))
     obs_scale = float(config.get("obs_scale", 1.0))
@@ -530,7 +594,7 @@ def train(
         print(
             f"Optimizer: algorithm={config['algorithm']} | curvature={use_curvature} | "
             f"mode={curvature_mode} | curvature_fitness={curvature_fitness} | "
-            f"trust_radius={trust_radius} | lr={base_lr}",
+            f"trust_radius={trust_radius} | lr={base_lr} | schedule={lr_schedule}",
             flush=True,
         )
 
@@ -546,7 +610,12 @@ def train(
     try:
         for iteration in range(n_iterations):
             start = time.time()
-            optimizer.learning_rate = base_lr * (lr_decay**iteration)
+            optimizer.learning_rate = learning_rate_at_iteration(
+                base_lr,
+                iteration,
+                schedule=lr_schedule,
+                decay=lr_decay,
+            )
             if obs_normalizer is not None:
                 obs_mean, obs_var = obs_normalizer.get_mean_var()
             else:
@@ -681,6 +750,15 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument(
+        "--lr-schedule",
+        choices=sorted(LR_SCHEDULES),
+        default=None,
+        help=(
+            "Learning-rate sequence. Existing configs default to exponential "
+            "with their configured lr_decay (1.0 means constant)."
+        ),
+    )
+    parser.add_argument(
         "--trust-radius",
         type=str,
         default=None,
@@ -726,6 +804,8 @@ def main() -> None:
     config = _condition_config(config, args.condition)
     if args.learning_rate is not None:
         config["learning_rate"] = float(args.learning_rate)
+    if args.lr_schedule is not None:
+        config["lr_schedule"] = args.lr_schedule
     if args.trust_radius is not None:
         config["trust_radius"] = _parse_optional_float(args.trust_radius)
     if args.reuse_fraction is not None:
@@ -752,6 +832,17 @@ def main() -> None:
         config["rank_fitness"] = args.rank_fitness == "true"
     if args.iterations is not None:
         config["n_iterations"] = int(args.iterations)
+
+    config.setdefault("lr_schedule", "exponential")
+    config["initial_learning_rate"] = float(config.get("learning_rate", 0.02))
+    actual_source_sha = _source_digest(args.config)
+    expected_source_sha = os.environ.get("PAPER_EXPECTED_SOURCE_SHA")
+    if expected_source_sha and actual_source_sha != expected_source_sha:
+        raise RuntimeError(
+            "source digest mismatch: "
+            f"expected {expected_source_sha}, found {actual_source_sha}"
+        )
+    config["source_sha256"] = actual_source_sha
 
     if args.workers is None:
         n_workers = max(1, len(os.sched_getaffinity(0)) - 2)

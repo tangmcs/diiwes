@@ -1,7 +1,6 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
-tests/
 Problem_to_fix/
 plots/
 scripts/summarize.py
