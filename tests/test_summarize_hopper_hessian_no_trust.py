@@ -17,6 +17,7 @@ from scripts.summarize_hopper_hessian_no_trust import (
     CONDITIONS,
     EXPECTED_COMMON_CONFIG,
     EXPECTED_DIAG_CONFIG,
+    EXPECTED_POPULATION_SIZE,
     INITIAL_LEARNING_RATES,
     LR_SCHEDULES,
     SEEDS,
@@ -91,8 +92,8 @@ class SweepFixture:
                 "max_fitness": evaluation + 1.0,
                 "grad_norm": 2.0,
                 "step_norm": 1.0,
-                "n_fresh": 200 if iteration == 0 or condition == "standard_es" else 160,
-                "n_reused": 0 if iteration == 0 or condition == "standard_es" else 40,
+                "n_fresh": 500,
+                "n_reused": 0,
                 "sigma": 0.02,
                 "train_env_steps": 10_000 * (iteration + 1),
                 "trust_active": False,
@@ -105,8 +106,18 @@ class SweepFixture:
                         "curvature_step_mode": "dampen",
                         "curvature_fitness": "raw",
                         "lambda": 0.1,
-                        "reuse_fraction": 0.2,
-                        "hessian_pairs": 100 if iteration == 0 else 80,
+                        "reuse_fraction": 0.0,
+                        "buffer_size": 0,
+                        "used_replay": False,
+                        "replay_weight_mass": 0.0,
+                        "fresh_weight_mass": 1.0,
+                        "importance_weight_mean": 1.0,
+                        "importance_weight_min": 1.0,
+                        "importance_weight_max": 1.0,
+                        "w_min": 0.002,
+                        "w_max": 0.002,
+                        "clip_frac": 0.0,
+                        "hessian_pairs": 250,
                         "h_split_correlation": 0.25 + 0.1 * iteration,
                         "h_split_sign_agreement": 0.6,
                         "h_split_relative_disagreement": 1.2,
@@ -202,6 +213,7 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
         self.assertEqual(LR_SCHEDULES, ("inverse_sqrt", "inverse_linear"))
         self.assertEqual(INITIAL_LEARNING_RATES, (10.0, 30.0))
         self.assertEqual(SEEDS, tuple(range(10)))
+        self.assertEqual(EXPECTED_POPULATION_SIZE, 500)
         self.assertEqual(
             len(CONDITIONS)
             * len(LR_SCHEDULES)
@@ -209,7 +221,8 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
             * len(SEEDS),
             80,
         )
-        self.assertEqual(EXPECTED_DIAG_CONFIG["reuse_fraction"], 0.2)
+        self.assertEqual(EXPECTED_DIAG_CONFIG["reuse_fraction"], 0.0)
+        self.assertEqual(EXPECTED_DIAG_CONFIG["buffer_size"], 0)
         self.assertEqual(EXPECTED_DIAG_CONFIG["curvature_fitness"], "raw")
         self.assertEqual(EXPECTED_DIAG_CONFIG["implicit_damping"], 0.1)
         self.assertEqual(EXPECTED_DIAG_CONFIG["curvature_beta"], 0.99)
@@ -257,11 +270,11 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
             )
             optimizer = DIIWES(
                 num_params=2,
-                population_size=200,
+                population_size=500,
                 learning_rate=10.0,
                 noise_std=0.02,
-                buffer_size=1024,
-                reuse_fraction=0.2,
+                buffer_size=0,
+                reuse_fraction=0.0,
                 trust_radius=None,
                 seed=0,
             )
@@ -329,10 +342,31 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
                     any(expected_text in issue for issue in caught.exception.issues)
                 )
 
+    def test_rejects_any_replay_or_nonuniform_fresh_weight(self) -> None:
+        for field, value in (
+            ("used_replay", True),
+            ("replay_weight_mass", 0.1),
+            ("w_max", 0.01),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as root:
+                run_dir = SweepFixture.write_run(
+                    root,
+                    condition="diag_curvature",
+                    schedule="inverse_sqrt",
+                    alpha0=10.0,
+                    seed=0,
+                )
+                path = os.path.join(run_dir, "history.json")
+                history = SweepFixture.read(path)
+                history[1][field] = value
+                SweepFixture.write(path, history)
+                with self.assertRaises(HessianSweepValidationError):
+                    self._validate_one(root)
+
     def test_rejects_schedule_default_and_source_deviations(self) -> None:
         mutations = (
             ("history", lambda history: history[1].__setitem__("lr", 10.0), "lr deviates"),
-            ("config", lambda config: config.__setitem__("reuse_fraction", 0.0), "reuse_fraction"),
+            ("config", lambda config: config.__setitem__("reuse_fraction", 0.2), "reuse_fraction"),
             ("config", lambda config: config.__setitem__("source_sha256", "b" * 64), "source digest"),
             ("config", lambda config: config.pop("trust_radius"), "explicit null"),
         )

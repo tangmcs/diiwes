@@ -748,6 +748,18 @@ def main() -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--condition", required=True, choices=sorted(CONDITIONS))
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--population-size",
+        type=int,
+        default=None,
+        help="Override the configured number of candidate policies per update.",
+    )
+    parser.add_argument(
+        "--buffer-size",
+        type=int,
+        default=None,
+        help="Override replay-buffer capacity; use 0 with reuse_fraction=0 for fresh-only runs.",
+    )
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument(
         "--lr-schedule",
@@ -802,6 +814,14 @@ def main() -> None:
 
     config = load_config(args.config)
     config = _condition_config(config, args.condition)
+    if args.population_size is not None:
+        if args.population_size <= 0:
+            raise ValueError("population_size must be positive")
+        config["population_size"] = int(args.population_size)
+    if args.buffer_size is not None:
+        if args.buffer_size < 0:
+            raise ValueError("buffer_size must be nonnegative")
+        config["buffer_size"] = int(args.buffer_size)
     if args.learning_rate is not None:
         config["learning_rate"] = float(args.learning_rate)
     if args.lr_schedule is not None:

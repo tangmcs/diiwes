@@ -12,8 +12,8 @@ Job `49678516` does not answer this question. It ran the later experimental
 `linearized_implicit_es` condition with
 `configs/mujuco/hopper_implicit_no_replay.yaml`, not `main`'s
 `diag_curvature` condition with `configs/mujuco/hopper.yaml`. Among other
-differences, that job used fresh-only samples and a signed frozen-rank linear
-system while disabling the replay, scalar damping, curvature
+differences, that job used population 200 and a signed frozen-rank linear
+system while disabling scalar damping, curvature
 projection/clipping, curvature EMA, and multiplier-floor behavior present in
 the main implementation. Its result therefore cannot be presented as a
 result for the main Hessian algorithm.
@@ -23,19 +23,26 @@ result for the main Hessian algorithm.
 - Environment/config: the original `configs/mujuco/hopper.yaml`.
 - Conditions: `standard_es` and `diag_curvature` only; no Picard or additional
   curvature arm.
+- Population: 500 candidates per update, increased from the main config's 200
+  to improve the stability of the diagonal Hessian estimate. This yields 250
+  fresh antithetic pairs at every update.
+- Replay: disabled with both `reuse_fraction: 0` and `buffer_size: 0`. No old
+  candidate receives an importance weight or enters the gradient/Hessian
+  estimate.
 - Learning rates: `alpha_t = alpha_0 / sqrt(t + 1)` and
   `alpha_t = alpha_0 / (t + 1)`, with `alpha_0` in `{10, 30}`.
 - Seeds: `0` through `9`, paired by condition within each schedule/rate cell.
 - Updates: 500.
 - Trust radius: explicitly `none` for every run.
 
-The launcher changes only condition, seed, initial learning rate, learning-rate
-schedule, and the requested trust setting. All other algorithm and experiment
-settings retain `main` behavior from the original Hopper config. In
-particular, `diag_curvature` still has the config's replay/importance-weighting,
-raw-return diagonal curvature, damping, clipping, EMA, and multiplier-floor
-semantics. Accordingly, this is a comparison of the two named main conditions,
-not a fresh-only ablation that isolates curvature from every other difference.
+The launcher changes only condition, seed, population size, replay settings,
+initial learning rate, learning-rate schedule, and the requested trust
+setting. All other algorithm and experiment settings retain `main` behavior
+from the original Hopper config. In particular, `diag_curvature` still has
+the main implementation's raw-return diagonal curvature, scalar damping,
+curvature clipping, EMA, and multiplier-floor semantics; only replay and trust
+are removed. Accordingly, this is a fresh-only comparison of the two named
+main conditions, not a newly substituted Hessian solver.
 
 The array has exactly 80 tasks. Seed is the fastest-changing index: tasks
 `0-39` are Standard ES, tasks `40-79` are diagonal curvature, and matched
@@ -71,7 +78,7 @@ training. After all 80 tasks finish, validate and summarize the matched matrix:
 
 ```bash
 python scripts/summarize_hopper_hessian_no_trust.py \
-  results/hopper_main_hessian_no_trust_<jobid> \
+  results/hopper_main_hessian_fresh_no_trust_pop500_<jobid> \
   --expected-source-sha "$SOURCE_SHA"
 ```
 

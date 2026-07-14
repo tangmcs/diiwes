@@ -54,6 +54,9 @@ elif [ "$RUNNING_UNDER_SLURM" = "1" ]; then
 fi
 
 CONFIG=configs/mujuco/hopper.yaml
+POPULATION_SIZE=500
+BUFFER_SIZE=0
+REUSE_FRACTION=0
 if [ -n "${PAPER_CONFIG:-}" ] && [ "$PAPER_CONFIG" != "$CONFIG" ]; then
   echo "PAPER_CONFIG cannot override the locked main-branch Hopper config." >&2
   exit 2
@@ -157,14 +160,17 @@ if [ -n "$EXPECTED_SOURCE_SHA" ] && \
   exit 2
 fi
 
-OUTPUT_ROOT=${PAPER_OUTPUT_ROOT:-results/hopper_main_hessian_no_trust_${SLURM_ARRAY_JOB_ID}}
+OUTPUT_ROOT=${PAPER_OUTPUT_ROOT:-results/hopper_main_hessian_fresh_no_trust_pop500_${SLURM_ARRAY_JOB_ID}}
 OUTPUT_DIR="${OUTPUT_ROOT}/${CONDITION}_${LR_SCHEDULE}_a${INITIAL_LR}_seed${SEED}_job${SLURM_ARRAY_JOB_ID}_task${TASK_ID}"
 SOURCE_REVISION=$(git rev-parse HEAD 2>/dev/null || printf 'unavailable')
-PROTOCOL="main standard_es vs main diag_curvature; decreasing learning rate; trust explicitly disabled; original Hopper config otherwise unchanged"
+PROTOCOL="main standard_es vs main diag_curvature; population 500; fresh-only/no replay; decreasing learning rate; trust explicitly disabled; original Hopper config otherwise unchanged"
 
 TRAIN_ARGS=(
   --config "$CONFIG"
   --condition "$CONDITION"
+  --population-size "$POPULATION_SIZE"
+  --buffer-size "$BUFFER_SIZE"
+  --reuse-fraction "$REUSE_FRACTION"
   --learning-rate "$INITIAL_LR"
   --lr-schedule "$LR_SCHEDULE"
   --trust-radius none
@@ -190,12 +196,15 @@ echo "Node: $SLURMD_NODENAME"
 echo "CPUs: $SLURM_CPUS_PER_TASK"
 echo "Workers: $WORKERS"
 echo "Condition: $CONDITION"
+echo "Population size: $POPULATION_SIZE"
+echo "Replay buffer size: $BUFFER_SIZE"
+echo "Reuse fraction: $REUSE_FRACTION"
 echo "Initial learning rate: $INITIAL_LR"
 echo "Learning-rate schedule: $LR_SCHEDULE ($LR_FORMULA, t=0,...,499)"
 echo "Seed: $SEED"
 echo "Updates: $CONFIG_UPDATES"
 echo "Trust radius: none"
-echo "Additional algorithm/config overrides beyond condition/rate/schedule/trust: none"
+echo "Additional requested overrides: population_size=$POPULATION_SIZE, buffer_size=$BUFFER_SIZE, reuse_fraction=$REUSE_FRACTION"
 echo "Dry run: $DRY_RUN"
 echo "Output: $OUTPUT_DIR"
 printf 'Command:'

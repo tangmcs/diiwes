@@ -4,6 +4,8 @@
 The production matrix contains 80 runs:
 
 * ``standard_es`` and ``diag_curvature``;
+* 500 candidates per update;
+* no replay or replay buffer;
 * inverse-square-root and inverse-linear learning-rate schedules;
 * initial learning rates 10 and 30; and
 * seeds 0 through 9.
@@ -36,13 +38,15 @@ ALPHA0S = INITIAL_LEARNING_RATES
 SEEDS = tuple(range(10))
 EXPECTED_ITERATIONS = 500
 EXPECTED_ENV = "Hopper-v5"
+EXPECTED_POPULATION_SIZE = 500
 
-# Values inherited from configs/mujuco/hopper.yaml on main.  Keeping these
-# locked makes the Hessian arm an interpretable change to Standard ES instead
-# of another optimizer redesign.
+# Values inherited from configs/mujuco/hopper.yaml on main, with the requested
+# population increase and fresh-only replay overrides. Keeping these locked
+# makes the Hessian arm an interpretable change to Standard ES instead of
+# another optimizer redesign.
 EXPECTED_COMMON_CONFIG: dict[str, Any] = {
     "env_name": EXPECTED_ENV,
-    "population_size": 200,
+    "population_size": EXPECTED_POPULATION_SIZE,
     "noise_std": 0.02,
     "l2_coeff": 0.0,
     "rank_fitness": True,
@@ -56,8 +60,8 @@ EXPECTED_COMMON_CONFIG: dict[str, Any] = {
     "log_interval": 10,
     "max_episode_steps": 1000,
     "use_obs_norm": True,
-    "buffer_size": 1024,
-    "reuse_fraction": 0.2,
+    "buffer_size": 0,
+    "reuse_fraction": 0.0,
     "buffer_sampling": "random",
     "min_importance_weight": 0.001,
     "max_importance_weight": 10.0,
@@ -78,8 +82,8 @@ EXPECTED_COMMON_CONFIG: dict[str, Any] = {
 EXPECTED_DIAG_CONFIG: dict[str, Any] = {
     "algorithm": "semi_implicit_curvature_es",
     "use_curvature": True,
-    "buffer_size": 1024,
-    "reuse_fraction": 0.2,
+    "buffer_size": 0,
+    "reuse_fraction": 0.0,
     "buffer_sampling": "random",
     "min_importance_weight": 0.001,
     "max_importance_weight": 10.0,
@@ -454,17 +458,39 @@ def _validate_diag_record(
         "curvature_step_mode": "dampen",
         "curvature_fitness": "raw",
         "lambda": 0.1,
-        "reuse_fraction": 0.2,
+        "reuse_fraction": 0.0,
+        "buffer_size": 0,
+        "used_replay": False,
     }
     for field, expected in exact.items():
         if not _matches(record.get(field), expected):
             issues.append(f"{context}.{field} violates the main diagonal protocol")
 
+    fresh_only_weights = {
+        "replay_weight_mass": 0.0,
+        "fresh_weight_mass": 1.0,
+        "importance_weight_mean": 1.0,
+        "importance_weight_min": 1.0,
+        "importance_weight_max": 1.0,
+        "w_min": 1.0 / EXPECTED_POPULATION_SIZE,
+        "w_max": 1.0 / EXPECTED_POPULATION_SIZE,
+        "clip_frac": 0.0,
+    }
+    for field, expected in fresh_only_weights.items():
+        value = _required_numeric(record, field, context, issues)
+        if value is not None and not np.isclose(
+            value, expected, rtol=1e-10, atol=1e-12
+        ):
+            issues.append(
+                f"{context}.{field}={value!r}, expected fresh-only value {expected!r}"
+            )
+
     hessian_pairs = _required_numeric(record, "hessian_pairs", context, issues)
-    if hessian_pairs is not None and (
-        hessian_pairs <= 0.0 or hessian_pairs != int(hessian_pairs)
-    ):
-        issues.append(f"{context}.hessian_pairs must be a positive integer")
+    expected_pairs = 250
+    if hessian_pairs is not None and hessian_pairs != expected_pairs:
+        issues.append(
+            f"{context}.hessian_pairs={hessian_pairs!r}, expected {expected_pairs}"
+        )
 
     # Pearson correlation is undefined for a constant Hessian vector.  The
     # producer represents that state as None, which _history_record omits.
@@ -594,12 +620,19 @@ def _history_issues(
                 and n_reused >= 0.0
                 and n_fresh == int(n_fresh)
                 and n_reused == int(n_reused)
-                and n_fresh + n_reused == 200.0
+                and n_fresh + n_reused == float(EXPECTED_POPULATION_SIZE)
             )
             if not valid_counts:
-                issues.append(f"{context}: fresh/reused counts do not form population 200")
-            if condition == "standard_es" and n_reused != 0.0:
-                issues.append(f"{context}: Standard ES unexpectedly reports replay")
+                issues.append(
+                    f"{context}: fresh/reused counts do not form population "
+                    f"{EXPECTED_POPULATION_SIZE}"
+                )
+            if n_fresh != EXPECTED_POPULATION_SIZE or n_reused != 0.0:
+                issues.append(
+                    f"{context}: fresh-only population counts are "
+                    f"{n_fresh}/{n_reused}, expected "
+                    f"{EXPECTED_POPULATION_SIZE}/0"
+                )
         if sigma is not None and not np.isclose(
             sigma, 0.02, rtol=1e-12, atol=1e-12
         ):
