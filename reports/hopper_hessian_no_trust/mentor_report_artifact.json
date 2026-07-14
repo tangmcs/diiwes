@@ -1,0 +1,641 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Hopper: Curvature vs Standard ES Without Trust Rescaling",
+    "description": "Technical report for the mentor-requested clean comparison of Standard ES and a signed diagonal frozen-rank curvature surrogate.",
+    "generatedAt": "2026-07-13T14:45:46-04:00",
+    "cards": [
+      {
+        "id": "validated_runs",
+        "description": "Complete runs passing the locked matrix and history validator.",
+        "dataset": "headline",
+        "sourceId": "validated_runs_csv",
+        "metrics": [
+          {
+            "label": "Validated runs",
+            "field": "validated_runs",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "supported_cells",
+        "description": "Primary-metric cells with an unadjusted exact two-sided paired sign-flip p-value below 0.05; the tests are descriptive.",
+        "dataset": "headline",
+        "sourceId": "paired_contrasts_json",
+        "metrics": [
+          {
+            "label": "AUC cells with p < 0.05 (of 4)",
+            "field": "auc_cells_p_below_005",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "split_sign",
+        "description": "Mean coordinate sign agreement between two halves of each curvature batch; 50% is chance agreement.",
+        "dataset": "headline",
+        "sourceId": "validated_runs_csv",
+        "metrics": [
+          {
+            "label": "Split-half sign agreement",
+            "field": "split_sign_agreement",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "max_amplification",
+        "description": "Largest observed curvature-step norm divided by the corresponding explicit ES-step norm.",
+        "dataset": "headline",
+        "sourceId": "validated_runs_csv",
+        "metrics": [
+          {
+            "label": "Maximum step amplification",
+            "field": "max_step_amplification",
+            "format": "compact"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "mean_auc_comparison",
+        "title": "Mean return AUC by learning-rate schedule and method",
+        "subtitle": "Ten paired Hopper seeds per cell; AUC integrates online evaluation return through 75,000 actual training steps.",
+        "type": "bar",
+        "dataset": "auc_means",
+        "sourceId": "paired_contrasts_json",
+        "encodings": {
+          "x": {
+            "field": "cell",
+            "type": "ordinal",
+            "label": "Schedule and initial learning rate"
+          },
+          "y": {
+            "field": "auc_mean",
+            "type": "quantitative",
+            "label": "Mean return AUC"
+          },
+          "color": {
+            "field": "method",
+            "type": "nominal",
+            "label": "Method"
+          },
+          "tooltip": [
+            {
+              "field": "auc_sd",
+              "type": "quantitative",
+              "label": "Across-seed sample SD"
+            },
+            {
+              "field": "n_seeds",
+              "type": "quantitative",
+              "label": "Paired seeds"
+            }
+          ]
+        },
+        "xAxisTitle": "Schedule and initial learning rate",
+        "yAxisTitle": "Return AUC through 75k training steps",
+        "valueFormat": "number",
+        "layout": "full"
+      },
+      {
+        "id": "paired_auc_distribution",
+        "title": "Seed-paired AUC differences by schedule cell",
+        "subtitle": "Curvature minus Standard ES for ten seeds per cell; positive values favor curvature.",
+        "type": "boxPlot",
+        "dataset": "paired_seed_differences",
+        "sourceId": "paired_contrasts_json",
+        "encodings": {
+          "x": {
+            "field": "cell",
+            "type": "ordinal",
+            "label": "Schedule and initial learning rate"
+          },
+          "y": {
+            "field": "paired_auc_difference",
+            "type": "quantitative",
+            "label": "Paired AUC difference"
+          },
+          "tooltip": [
+            {
+              "field": "seed",
+              "type": "quantitative",
+              "label": "Seed"
+            },
+            {
+              "field": "paired_auc_difference",
+              "type": "quantitative",
+              "label": "Curvature minus Standard ES"
+            }
+          ]
+        },
+        "xAxisTitle": "Schedule and initial learning rate",
+        "yAxisTitle": "Curvature minus Standard ES AUC",
+        "valueFormat": "number",
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "paired_auc_table",
+        "title": "Paired primary-metric results",
+        "subtitle": "Ten paired seeds per cell; differences are curvature minus Standard ES.",
+        "dataset": "paired_summary",
+        "sourceId": "paired_contrasts_json",
+        "density": "spacious",
+        "layout": "full",
+        "defaultSort": {
+          "field": "cell",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "cell",
+            "label": "Schedule cell",
+            "type": "text"
+          },
+          {
+            "field": "standard_auc_mean",
+            "label": "Standard ES mean AUC",
+            "format": "number"
+          },
+          {
+            "field": "curvature_auc_mean",
+            "label": "Curvature mean AUC",
+            "format": "number"
+          },
+          {
+            "field": "paired_mean_difference",
+            "label": "Paired mean difference",
+            "format": "number",
+            "movement": true
+          },
+          {
+            "field": "paired_median_difference",
+            "label": "Paired median difference",
+            "format": "number"
+          },
+          {
+            "field": "paired_sd",
+            "label": "Paired sample SD",
+            "format": "number"
+          },
+          {
+            "field": "wins_loss",
+            "label": "Wins-losses",
+            "type": "text"
+          },
+          {
+            "field": "exact_sign_flip_p",
+            "label": "Exact two-sided p",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "mechanism_table",
+        "title": "Curvature-estimator and solve diagnostics",
+        "subtitle": "Aggregated across the 40 signed diagonal curvature runs and all 500 updates per run.",
+        "dataset": "mechanism_diagnostics",
+        "sourceId": "validated_runs_csv",
+        "density": "spacious",
+        "layout": "full",
+        "defaultSort": {
+          "field": "diagnostic",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "diagnostic",
+            "label": "Diagnostic",
+            "type": "text"
+          },
+          {
+            "field": "value_display",
+            "label": "Observed value",
+            "type": "text"
+          },
+          {
+            "field": "interpretation",
+            "label": "Interpretation",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "paired_contrasts_json",
+        "label": "Validated seed-paired contrasts",
+        "path": "results/hopper_hessian_no_picard_no_replay_no_trust_power_schedules_49678516/paired_contrasts.json"
+      },
+      {
+        "id": "validated_runs_csv",
+        "label": "Validated 80-run Hopper matrix",
+        "path": "results/hopper_hessian_no_picard_no_replay_no_trust_power_schedules_49678516/validated_runs.csv"
+      },
+      {
+        "id": "protocol_document",
+        "label": "Locked experiment protocol and final result",
+        "path": "docs/hopper_hessian_job_49678516.md"
+      },
+      {
+        "id": "experiment_diagnosis",
+        "label": "Trust-region confound and failure diagnosis",
+        "path": "docs/experiment_diagnosis.md"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# Hopper: Curvature vs Standard ES Without Trust Rescaling"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "body": "## Technical summary\n\nThe clean mentor-requested comparison is complete. Across two decreasing learning-rate schedules and two large initial rates, the signed diagonal frozen-rank curvature surrogate does **not** reliably improve Standard ES. The apparent gain in one cell is not seed-consistent. The mechanism diagnostics separate the failure cleanly: diagonal division is numerically accurate, but the curvature estimate is non-repeatable and creates severely ill-conditioned update denominators. Trust-radius rescaling, replay, Picard iteration, damping, and clipping are absent from this experiment."
+      },
+      {
+        "id": "headline_metrics",
+        "type": "metric-strip",
+        "cardIds": [
+          "validated_runs",
+          "supported_cells",
+          "split_sign",
+          "max_amplification"
+        ]
+      },
+      {
+        "id": "performance_finding",
+        "type": "markdown",
+        "sourceId": "paired_contrasts_json",
+        "body": "## Curvature does not consistently improve the primary metric\n\nMean AUC is slightly higher for curvature in both inverse-square-root cells and lower in both inverse-linear cells. None of the four paired comparisons is consistent across seeds: win counts range from 4/10 to 6/10, and every exact two-sided sign-flip p-value is at least 0.369. The chart compares absolute means; its large curvature spread at `alpha_0=10` under the inverse-square-root schedule is an immediate warning against interpreting the mean alone."
+      },
+      {
+        "id": "mean_auc_chart",
+        "type": "chart",
+        "chartId": "mean_auc_comparison",
+        "layout": "full"
+      },
+      {
+        "id": "pairing_finding",
+        "type": "markdown",
+        "sourceId": "paired_contrasts_json",
+        "body": "## Seed pairing exposes the outlier behind the largest apparent gain\n\nFor `alpha_0=10` with `alpha_t = alpha_0/sqrt(t+1)`, the mean paired gain is +8.322 but the paired median is -8.820 and curvature wins only 4/10 seeds. Seed 9 contributes +119.661 AUC, reversing the sign of the average. The distribution view therefore supports the conservative conclusion: there is no robust curvature advantage in this matrix."
+      },
+      {
+        "id": "paired_distribution_chart",
+        "type": "chart",
+        "chartId": "paired_auc_distribution",
+        "layout": "full"
+      },
+      {
+        "id": "exact_results_finding",
+        "type": "markdown",
+        "sourceId": "paired_contrasts_json",
+        "body": "## Exact cell results agree with the distribution view\n\nThe paired mean, median, sample standard deviation, wins, and exact randomization p-value all point in the same direction: positive means are small or outlier-sensitive, while the inverse-linear cells are neutral to negative. These are exploratory cellwise tests, not a multiplicity-adjusted confirmatory family."
+      },
+      {
+        "id": "paired_results_table",
+        "type": "table",
+        "tableId": "paired_auc_table",
+        "layout": "full"
+      },
+      {
+        "id": "scope_definitions",
+        "type": "markdown",
+        "sourceId": "protocol_document",
+        "body": "## Scope and metric definitions\n\nThe study uses Hopper-v5, 200 fresh antithetic candidates per update, 500 updates, and ten paired seeds for every schedule/rate cell. The schedules are `alpha_t = alpha_0/sqrt(t+1)` and `alpha_t = alpha_0/(t+1)`, with `alpha_0` in {10, 30}. The primary metric is online evaluation-return AUC through 75,000 **actual training environment steps**, using linear interpolation at the boundary; evaluation rollouts are excluded from that budget. The curvature arm solves the signed diagonal linearization `delta_j = alpha_t g_j / (1 - alpha_t h_j)`. Because `h_j` comes from centered within-batch ranks held fixed in the linearization, the precise name is **signed diagonal frozen-rank curvature surrogate**, not raw-return Hessian."
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "sourceId": "protocol_document",
+        "body": "## Experimental controls isolate curvature from step-norm rescaling\n\nStandard ES and curvature use the same environment, policy architecture, population size, noise scale, observation-normalization protocol, schedule, initial rate, and paired seed. Replay, importance sampling, endpoint Picard iteration, trust radius, fixed-norm updates, scalar damping, L2, gradient clipping, parameter projection, curvature projection, curvature clipping, and curvature EMA are disabled. The validator checks the complete 80-cell task map, every scheduled learning-rate value, 500-record histories, fresh-only sampling, source-lock provenance, and signed-system arithmetic before emitting the result files."
+      },
+      {
+        "id": "mechanism_finding",
+        "type": "markdown",
+        "sourceId": "validated_runs_csv",
+        "body": "## Accurate division cannot rescue a non-repeatable curvature estimate\n\nThe maximum relative division residual is below 5e-17, so the elementwise arithmetic is not the failure. In contrast, split-half and temporal correlations are approximately zero, coordinate sign agreement is approximately 50%, the smallest absolute denominator reaches 6.29e-9, and one update is amplified by more than one million times relative to the explicit ES step. The evidence supports estimator-induced ill-conditioning of the signed system."
+      },
+      {
+        "id": "mechanism_results_table",
+        "type": "table",
+        "tableId": "mechanism_table",
+        "layout": "full"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## Limitations and robustness boundary\n\nThis is a clean basic comparison, not a universal test of curvature-informed ES. The 5,123-coordinate surrogate is estimated from only 100 antithetic pairs, and the very large updates move far outside the perturbation scale, so estimator noise and local-linearization error cannot be fully separated by return curves alone. Online evaluation uses three fixed episodes and is less stringent than the later 20-episode held-out confirmation. Exact cellwise p-values are descriptive because the four cells were not registered as a jointly adjusted confirmatory family. The completed run artifacts are tied to the archived source digest; the current worktree is newer and any rerun needs a new source lock."
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "body": "## Recommended next steps\n\n1. Share this negative basic result and the estimator-versus-arithmetic diagnosis with the mentor; do not reuse the trust-confounded plots.\n2. Before another environment sweep, require a curvature estimator to show materially positive split-batch agreement on frozen Hopper checkpoints.\n3. Compare any stabilized structured estimator against both Standard ES and a norm-matched isotropic attenuation control, without trust clipping.\n4. Add an explicit locality diagnostic such as `||delta_t||/sigma` so future work can separate estimator reliability from Taylor-remainder failure."
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## Further questions\n\n- How many independent antithetic pairs are needed before the signed curvature components become repeatable at Hopper dimension?\n- Does lower-dimensional block or subspace curvature retain directional information beyond generic attenuation?\n- At frozen checkpoints, does prediction error track update locality, denominator resonance, or both?\n- Can a matched-rank implicit formulation be derived whose gradient and curvature estimators are finite-population compatible?"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-13T14:45:46-04:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [
+        {
+          "validated_runs": 80,
+          "auc_cells_p_below_005": 0,
+          "split_sign_agreement": 0.4998934023033379,
+          "max_step_amplification": 1064336.1971972566
+        }
+      ],
+      "auc_means": [
+        {
+          "cell": "1/sqrt(t), alpha0=10",
+          "schedule": "inverse_sqrt",
+          "initial_alpha": 10,
+          "method": "Standard ES",
+          "auc_mean": 18.47966142177867,
+          "auc_sd": 8.571518290336863,
+          "n_seeds": 10
+        },
+        {
+          "cell": "1/sqrt(t), alpha0=10",
+          "schedule": "inverse_sqrt",
+          "initial_alpha": 10,
+          "method": "Signed diagonal curvature",
+          "auc_mean": 26.802091593940684,
+          "auc_sd": 35.53585889604104,
+          "n_seeds": 10
+        },
+        {
+          "cell": "1/sqrt(t), alpha0=30",
+          "schedule": "inverse_sqrt",
+          "initial_alpha": 30,
+          "method": "Standard ES",
+          "auc_mean": 16.259610220945895,
+          "auc_sd": 9.433707153563924,
+          "n_seeds": 10
+        },
+        {
+          "cell": "1/sqrt(t), alpha0=30",
+          "schedule": "inverse_sqrt",
+          "initial_alpha": 30,
+          "method": "Signed diagonal curvature",
+          "auc_mean": 16.82211337024948,
+          "auc_sd": 12.957920980754876,
+          "n_seeds": 10
+        },
+        {
+          "cell": "1/t, alpha0=10",
+          "schedule": "inverse_linear",
+          "initial_alpha": 10,
+          "method": "Standard ES",
+          "auc_mean": 22.87908473958158,
+          "auc_sd": 18.155087213728468,
+          "n_seeds": 10
+        },
+        {
+          "cell": "1/t, alpha0=10",
+          "schedule": "inverse_linear",
+          "initial_alpha": 10,
+          "method": "Signed diagonal curvature",
+          "auc_mean": 21.89805886417334,
+          "auc_sd": 16.619547389750156,
+          "n_seeds": 10
+        },
+        {
+          "cell": "1/t, alpha0=30",
+          "schedule": "inverse_linear",
+          "initial_alpha": 30,
+          "method": "Standard ES",
+          "auc_mean": 21.241461279167144,
+          "auc_sd": 12.534620172875206,
+          "n_seeds": 10
+        },
+        {
+          "cell": "1/t, alpha0=30",
+          "schedule": "inverse_linear",
+          "initial_alpha": 30,
+          "method": "Signed diagonal curvature",
+          "auc_mean": 16.797595781355405,
+          "auc_sd": 9.58210102086116,
+          "n_seeds": 10
+        }
+      ],
+      "paired_summary": [
+        {
+          "cell": "1/sqrt(t), alpha0=10",
+          "schedule": "inverse_sqrt",
+          "initial_alpha": 10,
+          "standard_auc_mean": 18.47966142177867,
+          "curvature_auc_mean": 26.802091593940684,
+          "paired_mean_difference": 8.322430172162012,
+          "paired_median_difference": -8.820155416120912,
+          "paired_sd": 41.01899911113514,
+          "wins": 4,
+          "losses": 6,
+          "wins_loss": "4-6",
+          "exact_sign_flip_p": 0.822265625
+        },
+        {
+          "cell": "1/sqrt(t), alpha0=30",
+          "schedule": "inverse_sqrt",
+          "initial_alpha": 30,
+          "standard_auc_mean": 16.259610220945895,
+          "curvature_auc_mean": 16.82211337024948,
+          "paired_mean_difference": 0.5625031493035897,
+          "paired_median_difference": 1.8469237730710213,
+          "paired_sd": 10.984193273536924,
+          "wins": 6,
+          "losses": 4,
+          "wins_loss": "6-4",
+          "exact_sign_flip_p": 0.89453125
+        },
+        {
+          "cell": "1/t, alpha0=10",
+          "schedule": "inverse_linear",
+          "initial_alpha": 10,
+          "standard_auc_mean": 22.87908473958158,
+          "curvature_auc_mean": 21.89805886417334,
+          "paired_mean_difference": -0.9810258754082397,
+          "paired_median_difference": -4.335238092855865,
+          "paired_sd": 28.812301846573288,
+          "wins": 4,
+          "losses": 6,
+          "wins_loss": "4-6",
+          "exact_sign_flip_p": 0.921875
+        },
+        {
+          "cell": "1/t, alpha0=30",
+          "schedule": "inverse_linear",
+          "initial_alpha": 30,
+          "standard_auc_mean": 21.241461279167144,
+          "curvature_auc_mean": 16.797595781355405,
+          "paired_mean_difference": -4.443865497811739,
+          "paired_median_difference": -2.7967461924321526,
+          "paired_sd": 15.312756483807616,
+          "wins": 5,
+          "losses": 5,
+          "wins_loss": "5-5",
+          "exact_sign_flip_p": 0.369140625
+        }
+      ],
+      "paired_seed_differences": [
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 0, "paired_auc_difference": 0.6981770535254874},
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 1, "paired_auc_difference": 17.967895645947326},
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 2, "paired_auc_difference": -7.702755952642608},
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 3, "paired_auc_difference": 16.291857444508388},
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 4, "paired_auc_difference": -11.340305188385459},
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 5, "paired_auc_difference": -10.430721856614536},
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 6, "paired_auc_difference": -12.746918814611327},
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 7, "paired_auc_difference": -9.937554879599213},
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 8, "paired_auc_difference": -19.236835755727956},
+        {"cell": "1/sqrt(t), alpha0=10", "schedule": "inverse_sqrt", "initial_alpha": 10, "seed": 9, "paired_auc_difference": 119.66146402522003},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 0, "paired_auc_difference": -0.030514176477600685},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 1, "paired_auc_difference": 10.110707387474074},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 2, "paired_auc_difference": -15.941390015863501},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 3, "paired_auc_difference": 3.614223924388183},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 4, "paired_auc_difference": 12.179473704314958},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 5, "paired_auc_difference": 13.738693976468614},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 6, "paired_auc_difference": 1.6950622595087772},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 7, "paired_auc_difference": -19.217012166485542},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 8, "paired_auc_difference": -2.5229986869253302},
+        {"cell": "1/sqrt(t), alpha0=30", "schedule": "inverse_sqrt", "initial_alpha": 30, "seed": 9, "paired_auc_difference": 1.9987852866332654},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 0, "paired_auc_difference": 13.396003754529515},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 1, "paired_auc_difference": 24.450323129314338},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 2, "paired_auc_difference": -5.0046284273925234},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 3, "paired_auc_difference": 5.410606704749975},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 4, "paired_auc_difference": -3.665847758319206},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 5, "paired_auc_difference": -9.815415326705384},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 6, "paired_auc_difference": -36.72812987641569},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 7, "paired_auc_difference": -13.527741614708212},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 8, "paired_auc_difference": -41.58329920019801},
+        {"cell": "1/t, alpha0=10", "schedule": "inverse_linear", "initial_alpha": 10, "seed": 9, "paired_auc_difference": 57.2578698610628},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 0, "paired_auc_difference": 2.6607257121127397},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 1, "paired_auc_difference": 13.596790033854264},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 2, "paired_auc_difference": -21.408350448160256},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 3, "paired_auc_difference": 8.767700677046626},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 4, "paired_auc_difference": 12.547872758817835},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 5, "paired_auc_difference": -8.254218096977045},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 6, "paired_auc_difference": -24.57372398875369},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 7, "paired_auc_difference": -24.04664770984336},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 8, "paired_auc_difference": -10.975368096808015},
+        {"cell": "1/t, alpha0=30", "schedule": "inverse_linear", "initial_alpha": 30, "seed": 9, "paired_auc_difference": 7.246564180593518}
+      ],
+      "mechanism_diagnostics": [
+        {
+          "diagnostic": "1. Maximum relative division residual",
+          "value_numeric": 4.935679548675915e-17,
+          "value_display": "4.94e-17",
+          "interpretation": "Elementwise division is numerically accurate."
+        },
+        {
+          "diagnostic": "2. Mean split-half curvature correlation",
+          "value_numeric": -0.00004528839183732003,
+          "value_display": "-4.53e-5",
+          "interpretation": "Independent batch halves have essentially no linear agreement."
+        },
+        {
+          "diagnostic": "3. Mean split-half sign agreement",
+          "value_numeric": 0.4998934023033379,
+          "value_display": "0.49989",
+          "interpretation": "Coordinate signs agree at approximately chance level."
+        },
+        {
+          "diagnostic": "4. Mean temporal curvature correlation",
+          "value_numeric": -0.0000685301789305493,
+          "value_display": "-6.85e-5",
+          "interpretation": "Adjacent-generation estimates have essentially no agreement."
+        },
+        {
+          "diagnostic": "5. Smallest absolute signed denominator",
+          "value_numeric": 6.2872563821869676e-9,
+          "value_display": "6.29e-9",
+          "interpretation": "The estimated system approaches resonance."
+        },
+        {
+          "diagnostic": "6. Median run-level condition estimate",
+          "value_numeric": 24903.387760845333,
+          "value_display": "24,903",
+          "interpretation": "Typical signed systems are severely ill-conditioned."
+        },
+        {
+          "diagnostic": "7. Largest step amplification",
+          "value_numeric": 1064336.1971972566,
+          "value_display": "1,064,336x",
+          "interpretation": "Near-zero denominators create extreme updates."
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "paired_contrasts_json",
+      "label": "Validated seed-paired contrasts",
+      "path": "results/hopper_hessian_no_picard_no_replay_no_trust_power_schedules_49678516/paired_contrasts.json",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "WITH payload AS (SELECT unnest(cells) AS cell FROM read_json_auto('results/hopper_hessian_no_picard_no_replay_no_trust_power_schedules_49678516/paired_contrasts.json', maximum_depth = -1)) SELECT cell.condition AS condition, cell.lr_schedule AS lr_schedule, cell.initial_learning_rate AS initial_learning_rate, cell.paired_runs AS paired_runs, cell.metrics.training_step_auc AS training_step_auc FROM payload",
+        "description": "Read the validated cell-level paired contrasts and seed differences used by the report.",
+        "tables_used": [
+          "results/hopper_hessian_no_picard_no_replay_no_trust_power_schedules_49678516/paired_contrasts.json"
+        ],
+        "filters": [
+          "primary metric = training_step_auc",
+          "difference direction = linearized_implicit_es minus standard_es"
+        ],
+        "metric_definitions": [
+          "training_step_auc is evaluation-return AUC normalized by 75,000 actual training environment steps",
+          "paired differences match condition, schedule, initial learning rate, and seed"
+        ]
+      }
+    },
+    {
+      "id": "validated_runs_csv",
+      "label": "Validated 80-run Hopper matrix",
+      "path": "results/hopper_hessian_no_picard_no_replay_no_trust_power_schedules_49678516/validated_runs.csv",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('results/hopper_hessian_no_picard_no_replay_no_trust_power_schedules_49678516/validated_runs.csv', header = true) WHERE condition IN ('standard_es', 'linearized_implicit_es')",
+        "description": "Read all validated run-level performance and mechanism diagnostics for the clean two-arm matrix.",
+        "tables_used": [
+          "results/hopper_hessian_no_picard_no_replay_no_trust_power_schedules_49678516/validated_runs.csv"
+        ],
+        "filters": [
+          "conditions = standard_es or linearized_implicit_es",
+          "80 validator-approved runs",
+          "500 updates per run"
+        ],
+        "metric_definitions": [
+          "split-half sign agreement is the mean coordinate sign match between two disjoint pair subsets within an update",
+          "step amplification is curvature step norm divided by the matched explicit ES step norm"
+        ]
+      }
+    },
+    {
+      "id": "protocol_document",
+      "label": "Locked experiment protocol and final result",
+      "path": "docs/hopper_hessian_job_49678516.md"
+    },
+    {
+      "id": "experiment_diagnosis",
+      "label": "Trust-region confound and failure diagnosis",
+      "path": "docs/experiment_diagnosis.md"
+    }
+  ],
+  "package_info": {}
+}

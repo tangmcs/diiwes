@@ -1,7 +1,9 @@
-# Requires Python 3.10+.
-numpy
-PyYAML
-matplotlib
-gymnasium[mujoco,atari]
-ale-py
-AutoROM[accept-rom-license]
+# Convenience pip specification matching environment.yml.
+# Python 3.10.18 is pinned by the Conda environment.
+numpy==1.26.4
+PyYAML==6.0.2
+matplotlib==3.10.5
+scipy==1.15.3
+gymnasium[mujoco,atari]==1.2.0
+mujoco==3.3.5
+ale-py==0.11.2

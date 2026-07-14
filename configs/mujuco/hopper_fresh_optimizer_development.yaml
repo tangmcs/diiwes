@@ -1,0 +1,39 @@
+# Exploratory Hopper optimizer calibration. Fresh populations only.
+
+env_name: Hopper-v5
+
+population_size: 200
+learning_rate: 0.01
+noise_std: 0.02
+l2_coeff: 0.0
+rank_fitness: true
+antithetic: true
+max_grad_norm: 0.0
+max_param_norm: null
+
+hidden_dims: [64, 64]
+activation: tanh
+output_activation: tanh
+init_param_std: 0.1
+
+n_iterations: 250
+eval_episodes: 5
+eval_interval: 10
+log_interval: 10
+max_episode_steps: 1000
+use_obs_norm: true
+obs_norm_mode: frozen_after_calibration
+obs_norm_calibration_episodes: 3
+
+heldout_evaluation_enabled: false
+
+replay_enabled: false
+buffer_size: 0
+reuse_fraction: 0.0
+common_rollout_seed: true
+
+implicit_damping: 0.0
+linear_min_abs_diagonal: 1.0e-12
+curvature_beta: 0.0
+
+evaluate_center_fitness: false

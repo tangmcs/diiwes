@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot MuJoCo learning-rate robustness from the long-format sweep table."""
+"""Plot the historical, trust-confounded MuJoCo learning-rate sweep."""
 
 from __future__ import annotations
 
@@ -314,7 +314,17 @@ def main() -> None:
         help="Long-format CSV produced by scripts/export_plot_table.py.",
     )
     parser.add_argument("--out-dir", default="plots", help="Directory for generated figures.")
+    parser.add_argument(
+        "--allow-confounded-historical-results",
+        action="store_true",
+        help="Acknowledge that the input sweep used trust clipping and is not evidence of robustness.",
+    )
     args = parser.parse_args()
+    if not args.allow_confounded_historical_results:
+        parser.error(
+            "this script only plots the retired trust-confounded sweep; pass "
+            "--allow-confounded-historical-results only for historical diagnosis"
+        )
 
     configure_style()
     os.makedirs(args.out_dir, exist_ok=True)

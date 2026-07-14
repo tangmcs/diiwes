@@ -12,10 +12,14 @@ from typing import Any
 
 
 METHOD_LABELS = {
+    # Retained only so old artifacts can still be exported for diagnosis.
     "standard_es": "Standard ES",
     "standard_es_trust": "ES+trust",
     "no_curvature": "DIIWES-no-H",
+    "scalar_damped_es": "Scalar-damped ES",
     "diag_curvature": "DIIWES-H",
+    "diag_curvature_raw": "DIIWES-H (raw)",
+    "diag_curvature_matched_rank": "DIIWES-H (matched rank)",
     "global_curvature": "DIIWES-global-H",
     "block_curvature": "DIIWES-block-H",
     "directional_curvature": "DIIWES-dir-H",
@@ -30,6 +34,8 @@ BASE_FIELDS = [
     "condition",
     "seed",
     "learning_rate",
+    "effective_learning_rate",
+    "lr_schedule",
     "iteration",
     "env_steps",
     "eval_return",
@@ -40,11 +46,16 @@ BASE_FIELDS = [
     "iteration_time_sec",
     "train_env_steps",
     "train_env_steps_iter",
+    "training_env_steps",
+    "training_env_steps_iter",
     "eval_env_steps",
     "eval_env_steps_iter",
     "total_env_steps",
     "total_env_steps_iter",
     "eval_count",
+    "initial_eval_return",
+    "normalization_calibration_env_steps",
+    "obs_norm_mode",
     "run_dir",
 ]
 
@@ -68,6 +79,13 @@ DIAGNOSTIC_FIELDS = [
     "importance_weight_max",
     "grad_norm",
     "step_norm",
+    "proposed_step_norm",
+    "no_curvature_step_norm",
+    "scalar_damped_step_norm",
+    "explicit_gradient_step_norm",
+    # Historical field retained for old artifact export.
+    "no_curvature_implicit_step_norm",
+    "parameter_projection_active",
     "pre_trust_step_norm",
     "no_curv_pre_trust_step_norm",
     "curv_norm_shrink",
@@ -87,8 +105,10 @@ DIAGNOSTIC_FIELDS = [
     "curv_max",
     "curv_min",
     "curvature_active_frac",
+    "curvature_clip_frac",
     "curvature_mode",
     "curvature_step_mode",
+    "curvature_matches_gradient",
     "curvature_baseline",
     "hessian_pairs",
     "h_raw_mean",
@@ -104,6 +124,35 @@ DIAGNOSTIC_FIELDS = [
     "lambda",
     "sigma",
     "reuse_fraction",
+    "n_replay_candidates",
+    "n_replay_overlapping",
+    "n_replay_below_ratio_floor",
+    "n_replay_selected_below_ratio_floor",
+    "predicted_replay_weight_mass",
+    "replay_mass_rejected",
+    "predicted_ess_ratio",
+    "replay_ess_rejected",
+    "replay_selection",
+    "replay_selection_uniform_within_overlap",
+    "replay_selection_unbiased",
+    "replay_weight_mass",
+    "min_replay_weight_mass",
+    "solver_type",
+    "solve_success",
+    "linear_relative_residual",
+    "linear_diagonal_min",
+    "linear_diagonal_max",
+    "linear_condition_estimate",
+    "linear_nonpositive_diagonal_frac",
+    "signed_linear_diagonal_min",
+    "signed_linear_diagonal_max",
+    "signed_linear_min_abs_diagonal",
+    "signed_linear_condition_estimate",
+    "signed_linear_nonpositive_diagonal_frac",
+    "signed_system_finite",
+    "signed_system_invertible",
+    "signed_system_positive",
+    "signed_linear_relative_residual",
 ]
 
 
@@ -139,6 +188,7 @@ def export_rows(root: str) -> list[dict[str, Any]]:
         method = METHOD_LABELS.get(condition, condition)
         seed = config.get("seed", "")
         config_lr = config.get("learning_rate", "")
+        lr_schedule = config.get("lr_schedule", "exponential" if "lr_decay" in config else "constant")
 
         cumulative_wall_time = 0.0
         for record in history:
@@ -150,7 +200,9 @@ def export_rows(root: str) -> list[dict[str, Any]]:
                 "method": method,
                 "condition": condition,
                 "seed": seed,
-                "learning_rate": _value(record, "lr", "learning_rate") or config_lr,
+                "learning_rate": config_lr,
+                "effective_learning_rate": _value(record, "lr", "learning_rate") or config_lr,
+                "lr_schedule": lr_schedule,
                 "iteration": record.get("iteration", ""),
                 "env_steps": _value(record, "env_steps", "train_env_steps"),
                 "eval_return": record.get("eval_reward", ""),
@@ -161,11 +213,20 @@ def export_rows(root: str) -> list[dict[str, Any]]:
                 "iteration_time_sec": iteration_time,
                 "train_env_steps": record.get("train_env_steps", ""),
                 "train_env_steps_iter": record.get("train_env_steps_iter", ""),
+                "training_env_steps": _value(record, "training_env_steps", "train_env_steps"),
+                "training_env_steps_iter": _value(
+                    record, "training_env_steps_iter", "train_env_steps_iter"
+                ),
                 "eval_env_steps": record.get("eval_env_steps", ""),
                 "eval_env_steps_iter": record.get("eval_env_steps_iter", ""),
                 "total_env_steps": record.get("total_env_steps", ""),
                 "total_env_steps_iter": record.get("total_env_steps_iter", ""),
                 "eval_count": record.get("eval_count", ""),
+                "initial_eval_return": record.get("initial_eval_reward", ""),
+                "normalization_calibration_env_steps": record.get(
+                    "normalization_calibration_env_steps", ""
+                ),
+                "obs_norm_mode": config.get("obs_norm_mode", ""),
                 "run_dir": run_dir,
             }
             for field in DIAGNOSTIC_FIELDS:

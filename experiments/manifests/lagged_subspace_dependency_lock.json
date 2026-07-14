@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "study": "lagged_subspace_frozen_checkpoint",
+  "kind": "dependency_locks",
+  "files": [
+    {
+      "path": "environment.yml",
+      "sha256": "99f657c0e6b5d560a48694de197b03adc23a7010767967dffea98655c1f600e5"
+    },
+    {
+      "path": "requirement.txt",
+      "sha256": "36e2e58db092063a0175807b0b60bb8d9dc1372043be97e23adc552f2afb01b9"
+    }
+  ]
+}

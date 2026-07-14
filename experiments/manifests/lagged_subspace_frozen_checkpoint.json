@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "study": "lagged_subspace_frozen_checkpoint",
+  "designation": "preregistered_mechanism_diagnostic",
+  "protocol_status": "final_locked_before_environment_outcomes",
+  "protocol": {
+    "path": "docs/lagged_subspace_frozen_checkpoint_protocol.md",
+    "sha256": "5c04b957e3fd8cee005626e2e112e8372571dae9372a1a87cfa66e32dde3ad38"
+  },
+  "tasks": [
+    {"task_index": 0, "env_name": "Hopper-v5", "observation_dim": 11, "action_dim": 3, "parameter_count": 5123, "policy_block_sizes": [768, 4160, 195], "policy_block_ranges": [[0, 768], [768, 4928], [4928, 5123]]},
+    {"task_index": 1, "env_name": "Walker2d-v5", "observation_dim": 17, "action_dim": 6, "parameter_count": 5702, "policy_block_sizes": [1152, 4160, 390], "policy_block_ranges": [[0, 1152], [1152, 5312], [5312, 5702]]},
+    {"task_index": 2, "env_name": "HalfCheetah-v5", "observation_dim": 17, "action_dim": 6, "parameter_count": 5702, "policy_block_sizes": [1152, 4160, 390], "policy_block_ranges": [[0, 1152], [1152, 5312], [5312, 5702]]}
+  ],
+  "training_seeds": [
+    300, 301, 302, 303, 304, 305, 306, 307, 308, 309,
+    310, 311, 312, 313, 314, 315, 316, 317, 318, 319
+  ],
+  "checkpoint_generations": [50, 150, 250],
+  "dimensions": {
+    "policy_hidden_widths": [64, 64],
+    "layer_blocks": 3,
+    "population_size": 200,
+    "antithetic_pairs_per_training_update": 100,
+    "training_updates": 250,
+    "lagged_gradient_count": 10,
+    "lagged_decay": 0.9,
+    "noise_std": 0.02,
+    "banks": ["A", "B"],
+    "pairs_per_bank": 2000,
+    "bank_b_partition_count": 20,
+    "pairs_per_partition": 100,
+    "locality_q": [0.25, 0.5, 1.0],
+    "endpoint_arms": ["structured", "isotropic", "explicit", "random"],
+    "endpoint_episodes": 10,
+    "calibration_episodes": 3
+  },
+  "training": {
+    "condition": "standard_es",
+    "learning_rate": 0.0001,
+    "learning_rate_schedule": "constant",
+    "rank_fitness": true,
+    "antithetic": true,
+    "common_rollout_seed_within_pair": true,
+    "observation_normalization": "frozen_after_three_calibration_episodes",
+    "online_evaluation_rollouts": 0,
+    "checkpoint_selection": "all_predeclared_generations_without_outcome_selection"
+  },
+  "rng": {
+    "scheme": "sha256_uint64_v1",
+    "master_seed": 2026071201,
+    "serialization": "canonical_json_utf8",
+    "uint64_extraction": "first_8_digest_bytes_big_endian",
+    "partition_permutation": "ascending_sha256_of_partition_seed_and_pair_index",
+    "basis_gaussian": "numpy_generator_pcg64_conditional_standard_normal_by_zero_block_v1",
+    "random_signed_permutation": "numpy_generator_pcg64_permutation_then_int64_rademacher_and_renormalize_by_block_v1",
+    "perturbation_gaussian": "numpy_generator_pcg64_standard_normal_per_pair_v1",
+    "namespaces": {
+      "basis": 11,
+      "random_control": 12,
+      "bank_perturbation": 21,
+      "bank_rollout": 22,
+      "bank_b_partition": 23,
+      "endpoint": 31,
+      "cluster_bootstrap": 41
+    }
+  },
+  "endpoint_evaluation": {
+    "center_evaluated_once_per_checkpoint": true,
+    "same_seed_bank_for_center_and_all_arms": true,
+    "seed_reuse_across_partitions_q_and_arms": true,
+    "seed_reuse_with_training_or_banks": false,
+    "paired_primary_contrast": "structured_minus_isotropic"
+  },
+  "analysis": {
+    "primary_q": 0.5,
+    "top_level_cluster": "training_seed",
+    "paired_across_tasks_by_seed_number": true,
+    "quantile_method": "linear",
+    "bootstrap_resamples": 20000,
+    "bootstrap_confidence": 0.95,
+    "simultaneous_metric_count": 12,
+    "mechanism_bound_method": "distribution_free_one_sided_median_order_statistics",
+    "mechanism_seed_count": 20,
+    "lower_order_index_zero_based": 3,
+    "upper_order_index_zero_based": 16,
+    "per_bound_error_numerator": 1351,
+    "per_bound_error_denominator": 1048576,
+    "per_bound_error": 0.0012884140014648438,
+    "simultaneous_coverage_lower_bound": 0.9845390319824219,
+    "endpoint_family_alpha": 0.034539031982421875,
+    "combined_false_advance_upper_bound": 0.05,
+    "seed_reductions": {
+      "L_seed": "q0.5_linear_p95_over_3_checkpoints_x_20_partitions_structured_step_over_sigma",
+      "D_seed": "median_over_3_checkpoint_bank_a_D_material",
+      "H_seed": "median_over_3_checkpoint_E_high",
+      "E_seed": "median_over_3_checkpoint_E_100"
+    },
+    "gate_thresholds": {
+      "locality_upper": 1.0,
+      "material_lower": 0.01,
+      "high_sample_upper": 0.25,
+      "operational_upper": 0.5,
+      "endpoint_adjusted_one_sided_p_upper": 0.034539031982421875
+    },
+    "endpoint_test": "one_sided_exact_binomial_sign_strict_positive_ties_fail",
+    "primary_multiplicity": "holm_across_exactly_3_tasks",
+    "secondary_multiplicity": "holm_across_exactly_6_task_by_control_contrasts",
+    "sensitivity_q": [0.25, 1.0],
+    "sensitivity_inference": "descriptive_only",
+    "zero_gradient_calibration": {
+      "detection": "scaled_l2_exact_zero_only",
+      "alpha_sentinel": 0.0,
+      "unresolved_reason": "bank_a_gradient_exact_zero",
+      "all_four_steps_zero": true,
+      "gate_policy": "fail_all_affected_task_conditions"
+    },
+    "minimum_passing_tasks": 2,
+    "machine_epsilon": 2.220446049250313e-16
+  },
+  "budget": {
+    "checkpoint_training_candidate_rollouts": 3000000,
+    "normalization_calibration_rollouts": 180,
+    "bank_candidate_rollouts": 1440000,
+    "endpoint_arm_rollouts": 432000,
+    "checkpoint_center_rollouts": 1800,
+    "total_policy_rollouts": 4873980,
+    "environment_transitions_are_separate": true
+  },
+  "prohibitions": {
+    "replay": false,
+    "importance_sampling": false,
+    "trust_clipping": false,
+    "picard_iteration": false,
+    "gradient_clipping": false,
+    "parameter_projection": false,
+    "curvature_clipping": false,
+    "l2_regularization": false,
+    "optimizer_momentum": false,
+    "curvature_ema": false,
+    "outcome_based_checkpoint_selection": false,
+    "post_outcome_record_exclusion": false
+  },
+  "required_hash_locks": [
+    "source_sha256",
+    "manifest_sha256",
+    "protocol_sha256",
+    "analyzer_sha256",
+    "launcher_sha256",
+    "dependency_lock_sha256"
+  ],
+  "claim_boundary": "frozen_checkpoint_mechanism_only_not_optimizer_or_sample_efficiency"
+}

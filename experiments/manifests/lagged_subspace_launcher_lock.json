@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "study": "lagged_subspace_frozen_checkpoint",
+  "kind": "launchers",
+  "files": [
+    {
+      "path": "scripts/submit_lagged_subspace_checkpoint_generation.sh",
+      "sha256": "98c2b3e165d24de25cc48a5640f8ad2d383d68de961ac60b34fe72ac801fbedf"
+    },
+    {
+      "path": "scripts/submit_lagged_subspace_diagnostic.sh",
+      "sha256": "c2bfe1a89a53b8e99723fae7c5af253638983a915955797d1fe31cc1ad8bcaca"
+    }
+  ]
+}

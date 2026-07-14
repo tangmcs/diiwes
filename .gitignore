@@ -1,15 +1,27 @@
+# Python caches and local environments
 __pycache__/
 *.py[cod]
 .pytest_cache/
-tests/
-Problem_to_fix/
-plots/
-scripts/summarize.py
-scripts/analyze_mujoco_results.py
-job_outputs/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Editor, OS, and local agent state
+.DS_Store
+*.swp
+.agents/
+.codex/
+
+# Large generated experiment artifacts. These remain available locally but are
+# represented in Git by compact validation documents and self-contained reports.
 results/
-figures/
+job_outputs/
 analysis/
-slurm/
-plots/*.csv
-plots/README.md
+figures/
+
+# Plot products are generated. Keep the directory policy visible in Git.
+plots/*
+!plots/README.md

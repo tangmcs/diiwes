@@ -1,9 +1,10 @@
-# HalfCheetah-v5 configuration for DIIWES robustness checks.
+# HalfCheetah-v5 configuration for general ES diagnostics.
 #
 # The CLI condition selects the optimizer variant:
-#   standard_es      -> plain ES baseline without trust-radius clipping
-#   no_curvature     -> DIIWES replay/implicit/trust step without curvature
-#   diag_curvature   -> DIIWES with diagonal curvature and trust-radius clipping
+#   standard_es      -> plain ES baseline
+#   scalar_damped_es            -> explicit ES with scalar step damping
+#   diag_curvature_raw          -> raw-return curvature preconditioner
+#   diag_curvature_matched_rank -> matched-rank curvature surrogate
 
 env_name: HalfCheetah-v5
 
@@ -25,24 +26,28 @@ eval_interval: 1
 log_interval: 10
 max_episode_steps: 1000
 use_obs_norm: true
+obs_norm_mode: frozen_after_calibration
+obs_norm_calibration_episodes: 3
 
-buffer_size: 1024
-reuse_fraction: 0.2
+# Replay is disabled while the update mechanisms are isolated.
+replay_enabled: false
+buffer_size: 0
+reuse_fraction: 0.0
 buffer_sampling: random
 min_importance_weight: 0.001
 max_importance_weight: 10.0
 max_sample_age: 3
 ess_min_ratio: 0.2
+min_replay_weight_mass: 0.01
 
 common_rollout_seed: true
 
-implicit_damping: 0.1
+scalar_damping: 0.1
 use_curvature: true
+curvature_fitness: raw
 curvature_mode: diag
 curvature_beta: 0.99
 curvature_clip: 1000.0
-min_step_multiplier: 0.05
-trust_radius: 1.0
 evaluate_center_fitness: false
 use_leave_one_out_curvature_baseline: true
 bias_correct_curvature_ema: true

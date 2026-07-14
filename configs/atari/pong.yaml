@@ -1,4 +1,4 @@
-# Pong Atari RAM configuration for DIIWES robustness checks.
+# Pong Atari RAM configuration for general ES diagnostics.
 
 env_name: ALE/Pong-v5
 env_kwargs:
@@ -28,25 +28,29 @@ eval_interval: 1
 log_interval: 25
 max_episode_steps: 10000
 use_obs_norm: true
+obs_norm_mode: frozen_after_calibration
+obs_norm_calibration_episodes: 3
 obs_scale: 1.0
 
-buffer_size: 1024
-reuse_fraction: 0.2
+# Replay is disabled while the update mechanisms are isolated.
+replay_enabled: false
+buffer_size: 0
+reuse_fraction: 0.0
 buffer_sampling: random
 min_importance_weight: 0.001
 max_importance_weight: 10.0
 max_sample_age: 3
 ess_min_ratio: 0.2
+min_replay_weight_mass: 0.01
 
 common_rollout_seed: false
 
-implicit_damping: 0.1
+scalar_damping: 0.1
 use_curvature: true
+curvature_fitness: raw
 curvature_mode: diag
 curvature_beta: 0.99
 curvature_clip: 1000.0
-min_step_multiplier: 0.05
-trust_radius: 1.0
 evaluate_center_fitness: false
 use_leave_one_out_curvature_baseline: true
 bias_correct_curvature_ema: true

@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "study": "hopper_fresh_optimizer_development",
+  "exploratory": true,
+  "seeds": [200, 201, 202],
+  "iterations": 250,
+  "cells": [
+    {
+      "cell_id": 0,
+      "label": "sgd_const_0p00003",
+      "condition": "standard_es",
+      "learning_rate": 0.00003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 1,
+      "label": "sgd_const_0p0001",
+      "condition": "standard_es",
+      "learning_rate": 0.0001,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 2,
+      "label": "sgd_const_0p0003",
+      "condition": "standard_es",
+      "learning_rate": 0.0003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 3,
+      "label": "sgd_const_0p001",
+      "condition": "standard_es",
+      "learning_rate": 0.001,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 4,
+      "label": "sgd_const_0p003",
+      "condition": "standard_es",
+      "learning_rate": 0.003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 5,
+      "label": "sgd_const_0p01",
+      "condition": "standard_es",
+      "learning_rate": 0.01,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 6,
+      "label": "sgd_const_0p03",
+      "condition": "standard_es",
+      "learning_rate": 0.03,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 7,
+      "label": "momentum_const_0p00003",
+      "condition": "momentum_es",
+      "learning_rate": 0.00003,
+      "lr_schedule": "constant",
+      "momentum_beta": 0.9
+    },
+    {
+      "cell_id": 8,
+      "label": "momentum_const_0p0003",
+      "condition": "momentum_es",
+      "learning_rate": 0.0003,
+      "lr_schedule": "constant",
+      "momentum_beta": 0.9
+    },
+    {
+      "cell_id": 9,
+      "label": "momentum_const_0p003",
+      "condition": "momentum_es",
+      "learning_rate": 0.003,
+      "lr_schedule": "constant",
+      "momentum_beta": 0.9
+    },
+    {
+      "cell_id": 10,
+      "label": "adam_const_0p0001",
+      "condition": "adam_es",
+      "learning_rate": 0.0001,
+      "lr_schedule": "constant",
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999,
+      "adam_epsilon": 1e-08
+    },
+    {
+      "cell_id": 11,
+      "label": "adam_const_0p001",
+      "condition": "adam_es",
+      "learning_rate": 0.001,
+      "lr_schedule": "constant",
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999,
+      "adam_epsilon": 1e-08
+    },
+    {
+      "cell_id": 12,
+      "label": "adam_const_0p003",
+      "condition": "adam_es",
+      "learning_rate": 0.003,
+      "lr_schedule": "constant",
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999,
+      "adam_epsilon": 1e-08
+    },
+    {
+      "cell_id": 13,
+      "label": "adam_const_0p01",
+      "condition": "adam_es",
+      "learning_rate": 0.01,
+      "lr_schedule": "constant",
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999,
+      "adam_epsilon": 1e-08
+    },
+    {
+      "cell_id": 14,
+      "label": "clipup_alpha0p005_vmax0p01",
+      "condition": "clipup_es",
+      "learning_rate": 0.005,
+      "lr_schedule": "constant",
+      "clipup_momentum": 0.9,
+      "clipup_max_speed": 0.01
+    },
+    {
+      "cell_id": 15,
+      "label": "clipup_alpha0p025_vmax0p05",
+      "condition": "clipup_es",
+      "learning_rate": 0.025,
+      "lr_schedule": "constant",
+      "clipup_momentum": 0.9,
+      "clipup_max_speed": 0.05
+    },
+    {
+      "cell_id": 16,
+      "label": "clipup_alpha0p05_vmax0p1",
+      "condition": "clipup_es",
+      "learning_rate": 0.05,
+      "lr_schedule": "constant",
+      "clipup_momentum": 0.9,
+      "clipup_max_speed": 0.1
+    },
+    {
+      "cell_id": 17,
+      "label": "clipup_alpha0p075_vmax0p15",
+      "condition": "clipup_es",
+      "learning_rate": 0.075,
+      "lr_schedule": "constant",
+      "clipup_momentum": 0.9,
+      "clipup_max_speed": 0.15
+    },
+    {
+      "cell_id": 18,
+      "label": "structured_const_0p00003",
+      "condition": "concave_block_ema_curvature_es",
+      "learning_rate": 0.00003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 19,
+      "label": "structured_const_0p0001",
+      "condition": "concave_block_ema_curvature_es",
+      "learning_rate": 0.0001,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 20,
+      "label": "structured_const_0p0003",
+      "condition": "concave_block_ema_curvature_es",
+      "learning_rate": 0.0003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 21,
+      "label": "structured_const_0p001",
+      "condition": "concave_block_ema_curvature_es",
+      "learning_rate": 0.001,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 22,
+      "label": "structured_const_0p003",
+      "condition": "concave_block_ema_curvature_es",
+      "learning_rate": 0.003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 23,
+      "label": "structured_const_0p03",
+      "condition": "concave_block_ema_curvature_es",
+      "learning_rate": 0.03,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 24,
+      "label": "isotropic_const_0p00003",
+      "condition": "concave_block_ema_isotropic_control_es",
+      "learning_rate": 0.00003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 25,
+      "label": "isotropic_const_0p0001",
+      "condition": "concave_block_ema_isotropic_control_es",
+      "learning_rate": 0.0001,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 26,
+      "label": "isotropic_const_0p0003",
+      "condition": "concave_block_ema_isotropic_control_es",
+      "learning_rate": 0.0003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 27,
+      "label": "isotropic_const_0p001",
+      "condition": "concave_block_ema_isotropic_control_es",
+      "learning_rate": 0.001,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 28,
+      "label": "isotropic_const_0p003",
+      "condition": "concave_block_ema_isotropic_control_es",
+      "learning_rate": 0.003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 29,
+      "label": "isotropic_const_0p03",
+      "condition": "concave_block_ema_isotropic_control_es",
+      "learning_rate": 0.03,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 30,
+      "label": "ols_shrinkage_const_0p0003",
+      "condition": "concave_block_ols_ema_curvature_es",
+      "learning_rate": 0.0003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 31,
+      "label": "ols_shrinkage_const_0p003",
+      "condition": "concave_block_ols_ema_curvature_es",
+      "learning_rate": 0.003,
+      "lr_schedule": "constant"
+    },
+    {
+      "cell_id": 32,
+      "label": "ols_shrinkage_const_0p03",
+      "condition": "concave_block_ols_ema_curvature_es",
+      "learning_rate": 0.03,
+      "lr_schedule": "constant"
+    }
+  ]
+}
