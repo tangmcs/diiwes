@@ -39,6 +39,7 @@ SEEDS = tuple(range(10))
 EXPECTED_ITERATIONS = 500
 EXPECTED_ENV = "Hopper-v5"
 EXPECTED_POPULATION_SIZE = 500
+EXPECTED_PARAMETER_COUNT = 5123
 
 # Values inherited from configs/mujuco/hopper.yaml on main, with the requested
 # population increase and fresh-only replay overrides. Keeping these locked
@@ -149,6 +150,34 @@ MECHANISM_FIELDS = (
     "max_linear_condition_estimate",
     "minimum_linear_abs_diagonal",
     "maximum_linear_abs_diagonal",
+    "curvature_coordinate_count",
+    "mean_curvature_active_count",
+    "mean_curvature_active_frac",
+    "mean_curvature_preclip_mean",
+    "max_curvature_preclip_max",
+    "total_curvature_clip_count",
+    "mean_curvature_clip_count",
+    "max_curvature_clip_count",
+    "mean_curvature_clip_frac",
+    "max_curvature_clip_frac",
+    "curvature_clip_active_iteration_fraction",
+    "mean_curvature_clip_excess_mean",
+    "mean_curvature_clip_excess_per_clipped_coordinate",
+    "max_curvature_clip_excess_max",
+    "multiplier_coordinate_count",
+    "minimum_raw_step_multiplier",
+    "maximum_raw_step_multiplier",
+    "total_multiplier_floor_clip_count",
+    "mean_multiplier_floor_clip_count",
+    "max_multiplier_floor_clip_count",
+    "mean_multiplier_floor_clip_frac",
+    "max_multiplier_floor_clip_frac",
+    "multiplier_floor_clip_active_iteration_fraction",
+    "mean_multiplier_floor_clip_deficit_mean",
+    "mean_multiplier_floor_clip_deficit_per_clipped_coordinate",
+    "max_multiplier_floor_clip_deficit_max",
+    "total_multiplier_ceiling_clip_count",
+    "multiplier_ceiling_clip_active_iteration_fraction",
     "mean_multiplier_floor_frac",
     "max_multiplier_floor_frac",
     "floor_active_iteration_fraction",
@@ -450,6 +479,23 @@ def _optional_numeric(
     return value
 
 
+def _required_bool(
+    record: dict[str, Any], field: str, context: str, issues: list[str]
+) -> bool | None:
+    if field not in record:
+        issues.append(f"{context} is missing {field}")
+        return None
+    value = record[field]
+    if not isinstance(value, bool):
+        issues.append(f"{context}.{field} is not boolean data")
+        return None
+    return value
+
+
+def _is_nonnegative_integer(value: float, *, positive: bool = False) -> bool:
+    return value == int(value) and value >= (1.0 if positive else 0.0)
+
+
 def _validate_diag_record(
     record: dict[str, Any], index: int, context: str, issues: list[str]
 ) -> None:
@@ -523,32 +569,407 @@ def _validate_diag_record(
         if temporal_sign is not None and not (0.0 <= temporal_sign <= 1.0):
             issues.append(f"{context}.h_temporal_sign_agreement is outside [0, 1]")
 
+    curvature_coordinates = _required_numeric(
+        record, "curvature_coordinate_count", context, issues
+    )
+    curvature_active_count = _required_numeric(
+        record, "curvature_active_count", context, issues
+    )
+    curvature_active_frac = _required_numeric(
+        record, "curvature_active_frac", context, issues
+    )
+    curvature_preclip_mean = _required_numeric(
+        record, "curvature_preclip_mean", context, issues
+    )
+    curvature_preclip_max = _required_numeric(
+        record, "curvature_preclip_max", context, issues
+    )
+    curvature_clip_count = _required_numeric(
+        record, "curvature_clip_count", context, issues
+    )
+    curvature_clip_frac = _required_numeric(
+        record, "curvature_clip_frac", context, issues
+    )
+    curvature_clip_active = _required_bool(
+        record, "curvature_clip_active", context, issues
+    )
+    curvature_excess_mean = _required_numeric(
+        record, "curvature_clip_excess_mean", context, issues
+    )
+    curvature_excess_max = _required_numeric(
+        record, "curvature_clip_excess_max", context, issues
+    )
+    curv_mean = _required_numeric(record, "curv_mean", context, issues)
+    curv_max = _required_numeric(record, "curv_max", context, issues)
+    curv_min = _required_numeric(record, "curv_min", context, issues)
+
+    curvature_count_valid = bool(
+        curvature_coordinates is not None
+        and _is_nonnegative_integer(curvature_coordinates, positive=True)
+    )
+    if curvature_coordinates is not None and not curvature_count_valid:
+        issues.append(f"{context}.curvature_coordinate_count is not a positive integer")
+    elif curvature_coordinates is not None and curvature_coordinates != EXPECTED_PARAMETER_COUNT:
+        issues.append(
+            f"{context}.curvature_coordinate_count={curvature_coordinates:g}, "
+            f"expected {EXPECTED_PARAMETER_COUNT} for the locked Hopper policy"
+        )
+    if curvature_active_count is not None and (
+        not _is_nonnegative_integer(curvature_active_count)
+        or (curvature_count_valid and curvature_active_count > curvature_coordinates)
+    ):
+        issues.append(f"{context}.curvature_active_count is invalid")
+    if curvature_clip_count is not None and (
+        not _is_nonnegative_integer(curvature_clip_count)
+        or (curvature_count_valid and curvature_clip_count > curvature_coordinates)
+        or (
+            curvature_active_count is not None
+            and curvature_clip_count > curvature_active_count
+        )
+    ):
+        issues.append(f"{context}.curvature_clip_count is invalid")
+    if curvature_active_frac is not None and not (0.0 <= curvature_active_frac <= 1.0):
+        issues.append(f"{context}.curvature_active_frac is outside [0, 1]")
+    if curvature_clip_frac is not None and not (0.0 <= curvature_clip_frac <= 1.0):
+        issues.append(f"{context}.curvature_clip_frac is outside [0, 1]")
+    if curvature_count_valid and curvature_active_count is not None and curvature_active_frac is not None:
+        if not np.isclose(
+            curvature_active_frac,
+            curvature_active_count / curvature_coordinates,
+            rtol=1e-12,
+            atol=1e-12,
+        ):
+            issues.append(
+                f"{context}.curvature_active_frac disagrees with count/coordinates"
+            )
+    if curvature_count_valid and curvature_clip_count is not None and curvature_clip_frac is not None:
+        if not np.isclose(
+            curvature_clip_frac,
+            curvature_clip_count / curvature_coordinates,
+            rtol=1e-12,
+            atol=1e-12,
+        ):
+            issues.append(
+                f"{context}.curvature_clip_frac disagrees with count/coordinates"
+            )
+    if curvature_clip_count is not None and curvature_clip_active is not None:
+        if curvature_clip_active is not (curvature_clip_count > 0.0):
+            issues.append(f"{context}.curvature_clip_active disagrees with clip count")
+    if curvature_preclip_mean is not None and curvature_preclip_mean < 0.0:
+        issues.append(f"{context}.curvature_preclip_mean is negative")
+    if curvature_preclip_max is not None and curvature_preclip_max < 0.0:
+        issues.append(f"{context}.curvature_preclip_max is negative")
+    if (
+        curvature_preclip_mean is not None
+        and curvature_preclip_max is not None
+        and curvature_preclip_max < curvature_preclip_mean
+    ):
+        issues.append(f"{context}: pre-clip maximum is below the pre-clip mean")
+    if curvature_active_count is not None and curvature_preclip_max is not None:
+        if (curvature_active_count > 0.0) is not (curvature_preclip_max > 0.0):
+            issues.append(
+                f"{context}: curvature active count disagrees with pre-clip maximum"
+            )
+
+    curvature_cap = float(EXPECTED_DIAG_CONFIG["curvature_clip"])
+    if curvature_clip_active is True:
+        if curvature_preclip_max is not None and not curvature_preclip_max > curvature_cap:
+            issues.append(f"{context}: active curvature cap lacks a strict exceedance")
+        if curvature_excess_mean is not None and curvature_excess_mean <= 0.0:
+            issues.append(f"{context}.curvature_clip_excess_mean is not positive")
+        if curvature_excess_max is not None and curvature_excess_max <= 0.0:
+            issues.append(f"{context}.curvature_clip_excess_max is not positive")
+        if curv_max is not None and not np.isclose(
+            curv_max, curvature_cap, rtol=1e-12, atol=1e-12
+        ):
+            issues.append(f"{context}.curv_max does not reach the configured cap")
+    elif curvature_clip_active is False:
+        if curvature_preclip_max is not None and curvature_preclip_max > curvature_cap:
+            issues.append(f"{context}: inactive curvature cap has a strict exceedance")
+        if (
+            curvature_preclip_max is not None
+            and curv_max is not None
+            and not np.isclose(
+                curv_max, curvature_preclip_max, rtol=1e-12, atol=1e-12
+            )
+        ):
+            issues.append(f"{context}: inactive cap changed the curvature maximum")
+        for field, value in (
+            ("curvature_clip_excess_mean", curvature_excess_mean),
+            ("curvature_clip_excess_max", curvature_excess_max),
+        ):
+            if value is not None and value != 0.0:
+                issues.append(f"{context}.{field} must be zero when clipping is inactive")
+    if (
+        curvature_excess_mean is not None
+        and curvature_excess_max is not None
+        and (
+            curvature_excess_mean < 0.0
+            or curvature_excess_max < curvature_excess_mean
+        )
+    ):
+        issues.append(f"{context}: curvature clip excess statistics are invalid")
+    if (
+        curvature_clip_active is True
+        and curvature_preclip_max is not None
+        and curvature_excess_max is not None
+        and not np.isclose(
+            curvature_excess_max,
+            curvature_preclip_max - curvature_cap,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+    ):
+        issues.append(f"{context}: curvature maximum/excess arithmetic is inconsistent")
+    if curv_min is not None and curv_min < 0.0:
+        issues.append(f"{context}.curv_min is negative")
+    if curv_max is not None and curv_max > curvature_cap + 1e-12:
+        issues.append(f"{context}.curv_max exceeds the configured cap")
+    if curv_min is not None and curv_mean is not None and curv_max is not None and not (
+        curv_min <= curv_mean <= curv_max
+    ):
+        issues.append(f"{context}: clipped curvature min/mean/max are inconsistent")
+    if (
+        curvature_count_valid
+        and curvature_preclip_mean is not None
+        and curv_mean is not None
+        and curvature_clip_count is not None
+        and curvature_excess_mean is not None
+    ):
+        expected_curv_mean = curvature_preclip_mean - (
+            curvature_clip_count * curvature_excess_mean / curvature_coordinates
+        )
+        if not np.isclose(curv_mean, expected_curv_mean, rtol=1e-10, atol=1e-10):
+            issues.append(f"{context}: pre/post curvature means are inconsistent")
+
+    multiplier_coordinates = _required_numeric(
+        record, "multiplier_coordinate_count", context, issues
+    )
+    raw_multiplier_min = _required_numeric(
+        record, "raw_step_multiplier_min", context, issues
+    )
+    raw_multiplier_max = _required_numeric(
+        record, "raw_step_multiplier_max", context, issues
+    )
+    multiplier_diagnostics_exact = _required_bool(
+        record, "multiplier_clipping_diagnostics_exact", context, issues
+    )
+    if multiplier_diagnostics_exact is not True:
+        issues.append(
+            f"{context}.multiplier_clipping_diagnostics_exact must be true"
+        )
+    floor_clip_count = _required_numeric(
+        record, "multiplier_floor_clip_count", context, issues
+    )
+    floor_clip_frac = _required_numeric(
+        record, "multiplier_floor_clip_frac", context, issues
+    )
+    floor_clip_active = _required_bool(
+        record, "multiplier_floor_clip_active", context, issues
+    )
+    floor_deficit_mean = _required_numeric(
+        record, "multiplier_floor_clip_deficit_mean", context, issues
+    )
+    floor_deficit_max = _required_numeric(
+        record, "multiplier_floor_clip_deficit_max", context, issues
+    )
+    ceiling_clip_count = _required_numeric(
+        record, "multiplier_ceiling_clip_count", context, issues
+    )
+    ceiling_clip_frac = _required_numeric(
+        record, "multiplier_ceiling_clip_frac", context, issues
+    )
+    ceiling_clip_active = _required_bool(
+        record, "multiplier_ceiling_clip_active", context, issues
+    )
+    ceiling_excess_mean = _required_numeric(
+        record, "multiplier_ceiling_clip_excess_mean", context, issues
+    )
+    ceiling_excess_max = _required_numeric(
+        record, "multiplier_ceiling_clip_excess_max", context, issues
+    )
+    multiplier_min = _required_numeric(record, "step_multiplier_min", context, issues)
+    multiplier_max = _required_numeric(record, "step_multiplier_max", context, issues)
+    legacy_floor_frac = _required_numeric(
+        record, "multiplier_floor_frac", context, issues
+    )
+
+    multiplier_count_valid = bool(
+        multiplier_coordinates is not None
+        and _is_nonnegative_integer(multiplier_coordinates, positive=True)
+    )
+    if multiplier_coordinates is not None and not multiplier_count_valid:
+        issues.append(f"{context}.multiplier_coordinate_count is not a positive integer")
+    elif multiplier_coordinates is not None and multiplier_coordinates != EXPECTED_PARAMETER_COUNT:
+        issues.append(
+            f"{context}.multiplier_coordinate_count={multiplier_coordinates:g}, "
+            f"expected {EXPECTED_PARAMETER_COUNT} for the locked Hopper policy"
+        )
+    if (
+        curvature_count_valid
+        and multiplier_count_valid
+        and multiplier_coordinates != curvature_coordinates
+    ):
+        issues.append(f"{context}: curvature/multiplier coordinate counts disagree")
+    if floor_clip_count is not None and (
+        not _is_nonnegative_integer(floor_clip_count)
+        or (multiplier_count_valid and floor_clip_count > multiplier_coordinates)
+    ):
+        issues.append(f"{context}.multiplier_floor_clip_count is invalid")
+    if floor_clip_frac is not None and not (0.0 <= floor_clip_frac <= 1.0):
+        issues.append(f"{context}.multiplier_floor_clip_frac is outside [0, 1]")
+    if multiplier_count_valid and floor_clip_count is not None and floor_clip_frac is not None:
+        if not np.isclose(
+            floor_clip_frac,
+            floor_clip_count / multiplier_coordinates,
+            rtol=1e-12,
+            atol=1e-12,
+        ):
+            issues.append(
+                f"{context}.multiplier_floor_clip_frac disagrees with count/coordinates"
+            )
+    if floor_clip_count is not None and floor_clip_active is not None:
+        if floor_clip_active is not (floor_clip_count > 0.0):
+            issues.append(
+                f"{context}.multiplier_floor_clip_active disagrees with clip count"
+            )
+    if raw_multiplier_min is not None and raw_multiplier_min <= 0.0:
+        issues.append(f"{context}.raw_step_multiplier_min is not positive")
+    if (
+        raw_multiplier_min is not None
+        and raw_multiplier_max is not None
+        and raw_multiplier_max < raw_multiplier_min
+    ):
+        issues.append(f"{context}: raw multiplier maximum is below its minimum")
+    if raw_multiplier_max is not None and raw_multiplier_max > 1.0 + 1e-12:
+        issues.append(f"{context}: raw multiplier exceeds the configured upper bound")
+    for field, value, expected in (
+        ("multiplier_ceiling_clip_count", ceiling_clip_count, 0.0),
+        ("multiplier_ceiling_clip_frac", ceiling_clip_frac, 0.0),
+        ("multiplier_ceiling_clip_excess_mean", ceiling_excess_mean, 0.0),
+        ("multiplier_ceiling_clip_excess_max", ceiling_excess_max, 0.0),
+    ):
+        if value is not None and value != expected:
+            issues.append(f"{context}.{field} must be zero in the locked protocol")
+    if ceiling_clip_active is not None and ceiling_clip_active is not False:
+        issues.append(
+            f"{context}.multiplier_ceiling_clip_active must be false in the locked protocol"
+        )
+
+    multiplier_floor = float(EXPECTED_DIAG_CONFIG["min_step_multiplier"])
+    if floor_clip_active is True:
+        if raw_multiplier_min is not None and not raw_multiplier_min < multiplier_floor:
+            issues.append(f"{context}: active multiplier floor lacks a strict deficit")
+        if floor_deficit_mean is not None and floor_deficit_mean <= 0.0:
+            issues.append(
+                f"{context}.multiplier_floor_clip_deficit_mean is not positive"
+            )
+        if floor_deficit_max is not None and floor_deficit_max <= 0.0:
+            issues.append(
+                f"{context}.multiplier_floor_clip_deficit_max is not positive"
+            )
+    elif floor_clip_active is False:
+        if raw_multiplier_min is not None and raw_multiplier_min < multiplier_floor:
+            issues.append(f"{context}: inactive multiplier floor has a strict deficit")
+        for field, value in (
+            ("multiplier_floor_clip_deficit_mean", floor_deficit_mean),
+            ("multiplier_floor_clip_deficit_max", floor_deficit_max),
+        ):
+            if value is not None and value != 0.0:
+                issues.append(f"{context}.{field} must be zero when clipping is inactive")
+    if (
+        floor_deficit_mean is not None
+        and floor_deficit_max is not None
+        and (floor_deficit_mean < 0.0 or floor_deficit_max < floor_deficit_mean)
+    ):
+        issues.append(f"{context}: multiplier floor deficit statistics are invalid")
+    if (
+        floor_clip_active is True
+        and raw_multiplier_min is not None
+        and floor_deficit_max is not None
+        and not np.isclose(
+            floor_deficit_max,
+            multiplier_floor - raw_multiplier_min,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+    ):
+        issues.append(f"{context}: multiplier minimum/deficit arithmetic is inconsistent")
+    if multiplier_min is not None and raw_multiplier_min is not None:
+        expected_multiplier_min = max(raw_multiplier_min, multiplier_floor)
+        if not np.isclose(
+            multiplier_min, expected_multiplier_min, rtol=1e-12, atol=1e-12
+        ):
+            issues.append(f"{context}: raw/applied multiplier minima are inconsistent")
+    if multiplier_max is not None and raw_multiplier_max is not None:
+        expected_multiplier_max = min(raw_multiplier_max, 1.0)
+        if not np.isclose(
+            multiplier_max, expected_multiplier_max, rtol=1e-12, atol=1e-12
+        ):
+            issues.append(f"{context}: raw/applied multiplier maxima are inconsistent")
+    if legacy_floor_frac is not None:
+        if not (0.0 <= legacy_floor_frac <= 1.0):
+            issues.append(f"{context}.multiplier_floor_frac is outside [0, 1]")
+        if floor_clip_frac is not None and legacy_floor_frac + 1e-12 < floor_clip_frac:
+            issues.append(
+                f"{context}: legacy at-floor fraction is below strict clip fraction"
+            )
+
     division = _required_numeric(record, "division_relative_residual", context, issues)
     applied = _required_numeric(record, "applied_relative_residual", context, issues)
-    condition = _required_numeric(record, "linear_condition_estimate", context, issues)
+    linear_condition = _required_numeric(record, "linear_condition_estimate", context, issues)
     minimum = _required_numeric(record, "linear_min_abs_diagonal", context, issues)
     maximum = _required_numeric(record, "linear_max_abs_diagonal", context, issues)
-    floor = _required_numeric(record, "multiplier_floor_frac", context, issues)
     if division is not None and division < 0.0:
         issues.append(f"{context}.division_relative_residual is negative")
     if applied is not None and applied < 0.0:
         issues.append(f"{context}.applied_relative_residual is negative")
-    if condition is not None and condition < 1.0 - 1e-12:
+    if linear_condition is not None and linear_condition < 1.0 - 1e-12:
         issues.append(f"{context}.linear_condition_estimate is below one")
     if minimum is not None and minimum <= 0.0:
         issues.append(f"{context}.linear_min_abs_diagonal is not positive")
     if minimum is not None and maximum is not None and maximum < minimum:
         issues.append(f"{context}: maximum absolute diagonal is below the minimum")
-    if minimum is not None and maximum is not None and condition is not None:
+    if minimum is not None and maximum is not None and linear_condition is not None:
         expected_condition = maximum / minimum
         if not np.isclose(
-            condition, expected_condition, rtol=1e-10, atol=1e-12
+            linear_condition, expected_condition, rtol=1e-10, atol=1e-12
         ):
             issues.append(
                 f"{context}.linear_condition_estimate disagrees with diagonal extrema"
             )
-    if floor is not None and not (0.0 <= floor <= 1.0):
-        issues.append(f"{context}.multiplier_floor_frac is outside [0, 1]")
+    learning_rate = _finite_float(record.get("lr"))
+    if (
+        learning_rate is not None
+        and curv_min is not None
+        and curv_max is not None
+        and minimum is not None
+        and maximum is not None
+    ):
+        expected_minimum = 1.0 + learning_rate * curv_min
+        expected_maximum = 1.0 + learning_rate * curv_max
+        if not np.isclose(minimum, expected_minimum, rtol=1e-10, atol=1e-10):
+            issues.append(
+                f"{context}.linear_min_abs_diagonal disagrees with curvature and lr"
+            )
+        if not np.isclose(maximum, expected_maximum, rtol=1e-10, atol=1e-10):
+            issues.append(
+                f"{context}.linear_max_abs_diagonal disagrees with curvature and lr"
+            )
+    if maximum is not None and raw_multiplier_min is not None:
+        if not np.isclose(
+            raw_multiplier_min, 1.0 / maximum, rtol=1e-10, atol=1e-12
+        ):
+            issues.append(
+                f"{context}.raw_step_multiplier_min disagrees with linear diagonal"
+            )
+    if minimum is not None and raw_multiplier_max is not None:
+        if not np.isclose(
+            raw_multiplier_max, 1.0 / minimum, rtol=1e-10, atol=1e-12
+        ):
+            issues.append(
+                f"{context}.raw_step_multiplier_max disagrees with linear diagonal"
+            )
 
 
 def _history_issues(
@@ -582,6 +1003,8 @@ def _history_issues(
     schedule_mismatches: list[int] = []
     trust_active: list[int] = []
     trust_scaled: list[int] = []
+    curvature_coordinate_counts: list[int] = []
+    multiplier_coordinate_counts: list[int] = []
     for index, record in enumerate(history):
         context = f"{run_dir}: history[{index}]"
         if not isinstance(record, dict):
@@ -649,6 +1072,20 @@ def _history_issues(
 
         if condition == "diag_curvature":
             _validate_diag_record(record, index, context, issues)
+            curvature_coordinates = _finite_float(
+                record.get("curvature_coordinate_count")
+            )
+            multiplier_coordinates = _finite_float(
+                record.get("multiplier_coordinate_count")
+            )
+            if curvature_coordinates is not None and _is_nonnegative_integer(
+                curvature_coordinates, positive=True
+            ):
+                curvature_coordinate_counts.append(int(curvature_coordinates))
+            if multiplier_coordinates is not None and _is_nonnegative_integer(
+                multiplier_coordinates, positive=True
+            ):
+                multiplier_coordinate_counts.append(int(multiplier_coordinates))
 
     if schedule_mismatches:
         issues.append(
@@ -663,6 +1100,10 @@ def _history_issues(
         issues.append(
             f"{run_dir}: trust_scale is not one at iteration(s) {trust_scaled[:10]}"
         )
+    if curvature_coordinate_counts and len(set(curvature_coordinate_counts)) != 1:
+        issues.append(f"{run_dir}: curvature coordinate count changes across iterations")
+    if multiplier_coordinate_counts and len(set(multiplier_coordinate_counts)) != 1:
+        issues.append(f"{run_dir}: multiplier coordinate count changes across iterations")
     if len(train_steps) == len(history) and train_steps:
         steps = np.asarray(train_steps, dtype=np.float64)
         if steps[0] <= 0.0 or np.any(np.diff(steps) <= 0.0):
@@ -738,6 +1179,49 @@ def _row_from_run(
         floor_values = np.asarray(
             [float(record["multiplier_floor_frac"]) for record in history]
         )
+        curvature_active_counts = np.asarray(
+            [float(record["curvature_active_count"]) for record in history]
+        )
+        curvature_active_fracs = np.asarray(
+            [float(record["curvature_active_frac"]) for record in history]
+        )
+        curvature_clip_counts = np.asarray(
+            [float(record["curvature_clip_count"]) for record in history]
+        )
+        curvature_clip_fracs = np.asarray(
+            [float(record["curvature_clip_frac"]) for record in history]
+        )
+        curvature_clip_active = np.asarray(
+            [bool(record["curvature_clip_active"]) for record in history]
+        )
+        multiplier_floor_clip_counts = np.asarray(
+            [float(record["multiplier_floor_clip_count"]) for record in history]
+        )
+        multiplier_floor_clip_fracs = np.asarray(
+            [float(record["multiplier_floor_clip_frac"]) for record in history]
+        )
+        multiplier_floor_clip_active = np.asarray(
+            [bool(record["multiplier_floor_clip_active"]) for record in history]
+        )
+        multiplier_ceiling_clip_counts = np.asarray(
+            [float(record["multiplier_ceiling_clip_count"]) for record in history]
+        )
+        multiplier_ceiling_clip_active = np.asarray(
+            [bool(record["multiplier_ceiling_clip_active"]) for record in history]
+        )
+        total_curvature_clip_count = int(np.sum(curvature_clip_counts))
+        total_multiplier_floor_clip_count = int(
+            np.sum(multiplier_floor_clip_counts)
+        )
+        curvature_excess_means = np.asarray(
+            [float(record["curvature_clip_excess_mean"]) for record in history]
+        )
+        multiplier_deficit_means = np.asarray(
+            [
+                float(record["multiplier_floor_clip_deficit_mean"])
+                for record in history
+            ]
+        )
         row.update(
             {
                 "mean_hessian_pairs": _mean(history, "hessian_pairs"),
@@ -786,6 +1270,101 @@ def _row_from_run(
                 ),
                 "maximum_linear_abs_diagonal": float(
                     np.max([record["linear_max_abs_diagonal"] for record in history])
+                ),
+                "curvature_coordinate_count": int(
+                    history[0]["curvature_coordinate_count"]
+                ),
+                "mean_curvature_active_count": float(
+                    np.mean(curvature_active_counts)
+                ),
+                "mean_curvature_active_frac": float(
+                    np.mean(curvature_active_fracs)
+                ),
+                "mean_curvature_preclip_mean": _mean(
+                    history, "curvature_preclip_mean"
+                ),
+                "max_curvature_preclip_max": _maximum(
+                    history, "curvature_preclip_max"
+                ),
+                "total_curvature_clip_count": total_curvature_clip_count,
+                "mean_curvature_clip_count": float(
+                    np.mean(curvature_clip_counts)
+                ),
+                "max_curvature_clip_count": int(
+                    np.max(curvature_clip_counts)
+                ),
+                "mean_curvature_clip_frac": float(
+                    np.mean(curvature_clip_fracs)
+                ),
+                "max_curvature_clip_frac": float(
+                    np.max(curvature_clip_fracs)
+                ),
+                "curvature_clip_active_iteration_fraction": float(
+                    np.mean(curvature_clip_active)
+                ),
+                "mean_curvature_clip_excess_mean": _mean(
+                    history, "curvature_clip_excess_mean"
+                ),
+                "mean_curvature_clip_excess_per_clipped_coordinate": (
+                    float(
+                        np.sum(curvature_clip_counts * curvature_excess_means)
+                        / total_curvature_clip_count
+                    )
+                    if total_curvature_clip_count
+                    else 0.0
+                ),
+                "max_curvature_clip_excess_max": _maximum(
+                    history, "curvature_clip_excess_max"
+                ),
+                "multiplier_coordinate_count": int(
+                    history[0]["multiplier_coordinate_count"]
+                ),
+                "minimum_raw_step_multiplier": float(
+                    np.min([record["raw_step_multiplier_min"] for record in history])
+                ),
+                "maximum_raw_step_multiplier": float(
+                    np.max([record["raw_step_multiplier_max"] for record in history])
+                ),
+                "total_multiplier_floor_clip_count": (
+                    total_multiplier_floor_clip_count
+                ),
+                "mean_multiplier_floor_clip_count": float(
+                    np.mean(multiplier_floor_clip_counts)
+                ),
+                "max_multiplier_floor_clip_count": int(
+                    np.max(multiplier_floor_clip_counts)
+                ),
+                "mean_multiplier_floor_clip_frac": float(
+                    np.mean(multiplier_floor_clip_fracs)
+                ),
+                "max_multiplier_floor_clip_frac": float(
+                    np.max(multiplier_floor_clip_fracs)
+                ),
+                "multiplier_floor_clip_active_iteration_fraction": float(
+                    np.mean(multiplier_floor_clip_active)
+                ),
+                "mean_multiplier_floor_clip_deficit_mean": _mean(
+                    history, "multiplier_floor_clip_deficit_mean"
+                ),
+                "mean_multiplier_floor_clip_deficit_per_clipped_coordinate": (
+                    float(
+                        np.sum(
+                            multiplier_floor_clip_counts
+                            * multiplier_deficit_means
+                        )
+                        / total_multiplier_floor_clip_count
+                    )
+                    if total_multiplier_floor_clip_count
+                    else 0.0
+                ),
+                "max_multiplier_floor_clip_deficit_max": _maximum(
+                    history, "multiplier_floor_clip_deficit_max"
+                ),
+                "total_multiplier_ceiling_clip_count": int(
+                    np.sum(multiplier_ceiling_clip_counts)
+                ),
+                "multiplier_ceiling_clip_active_iteration_fraction": float(
+                    np.mean(multiplier_ceiling_clip_active)
                 ),
                 "mean_multiplier_floor_frac": float(np.mean(floor_values)),
                 "max_multiplier_floor_frac": float(np.max(floor_values)),

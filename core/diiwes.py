@@ -597,17 +597,49 @@ class DIIWES(StandardES):
         alpha = float(self.learning_rate)
         # lam is a global damping term that makes every step smaller and more stable
         lam = float(self.implicit_damping)
+        curvature_coordinate_count = int(hessian_for_step.size)
         if self.use_curvature:
             # Only directions with negative curvature shrink the step. Positive directions do not add curvature damping.
-            curv = np.maximum(-hessian_for_step, 0.0)
-            # clips the curvature so a noisy Hessian estimate cannot create a large denominator.
-            curv = np.clip(curv, 0.0, self.curvature_clip)
+            curvature_preclip = np.maximum(-hessian_for_step, 0.0)
         else:
-            curv = np.zeros_like(grad)
+            curvature_preclip = np.zeros_like(grad)
+        curvature_clip_mask = (
+            curvature_preclip > self.curvature_clip
+            if self.use_curvature
+            else np.zeros(curvature_preclip.shape, dtype=bool)
+        )
+        curvature_clip_count = int(np.count_nonzero(curvature_clip_mask))
+        if curvature_clip_count:
+            curvature_clip_excess = (
+                curvature_preclip[curvature_clip_mask] - self.curvature_clip
+            )
+            curvature_clip_excess_mean = float(np.mean(curvature_clip_excess))
+            curvature_clip_excess_max = float(np.max(curvature_clip_excess))
+        else:
+            curvature_clip_excess_mean = 0.0
+            curvature_clip_excess_max = 0.0
+        # Clip only after recording the strict pre-clip mask, so equality with
+        # the cap is not reported as an intervention.
+        curv = (
+            np.clip(curvature_preclip, 0.0, self.curvature_clip)
+            if self.use_curvature
+            else curvature_preclip
+        )
         if self.l2_coeff > 0.0 and self.curvature_step_mode == "dampen":
             curv = curv + self.l2_coeff
+        # Preserve the legacy post-processing meaning of
+        # ``curvature_active_frac`` while adding its exact count.
+        curvature_active_mask = curv > 0.0
+        curvature_active_count = int(np.count_nonzero(curvature_active_mask))
 
         linear_system_diagonal: np.ndarray | None = None
+        multiplier_coordinate_count = int(grad.size)
+        raw_step_multiplier = np.ones_like(grad)
+        multiplier_floor_clip_mask = np.zeros(grad.shape, dtype=bool)
+        multiplier_ceiling_clip_mask = np.zeros(grad.shape, dtype=bool)
+        multiplier_clipping_diagnostics_exact = not (
+            self.curvature_step_mode == "normalized" and self.use_curvature
+        )
         if self.curvature_step_mode == "normalized" and self.use_curvature:
             base_denom = 1.0 + alpha * lam
             if self.l2_coeff > 0.0:
@@ -623,11 +655,54 @@ class DIIWES(StandardES):
                     1.0 / max(self.min_step_multiplier, 1e-12),
                 )
             multiplier = base_multiplier * preconditioner
+            # This mode clips the normalized preconditioner rather than the
+            # final step multiplier. The final-multiplier diagnostics below
+            # therefore report no direct lower/upper intervention here.
+            raw_step_multiplier = multiplier.copy()
         else:
             denom = 1.0 + alpha * lam + alpha * curv
             linear_system_diagonal = np.maximum(denom, 1e-12)
-            multiplier = 1.0 / linear_system_diagonal
-            multiplier = np.clip(multiplier, self.min_step_multiplier, 1.0)
+            raw_step_multiplier = 1.0 / linear_system_diagonal
+            multiplier_floor_clip_mask = (
+                raw_step_multiplier < self.min_step_multiplier
+            )
+            multiplier_ceiling_clip_mask = raw_step_multiplier > 1.0
+            multiplier = np.clip(
+                raw_step_multiplier, self.min_step_multiplier, 1.0
+            )
+        multiplier_floor_clip_count = int(
+            np.count_nonzero(multiplier_floor_clip_mask)
+        )
+        if multiplier_floor_clip_count:
+            multiplier_floor_clip_deficit = (
+                self.min_step_multiplier
+                - raw_step_multiplier[multiplier_floor_clip_mask]
+            )
+            multiplier_floor_clip_deficit_mean = float(
+                np.mean(multiplier_floor_clip_deficit)
+            )
+            multiplier_floor_clip_deficit_max = float(
+                np.max(multiplier_floor_clip_deficit)
+            )
+        else:
+            multiplier_floor_clip_deficit_mean = 0.0
+            multiplier_floor_clip_deficit_max = 0.0
+        multiplier_ceiling_clip_count = int(
+            np.count_nonzero(multiplier_ceiling_clip_mask)
+        )
+        if multiplier_ceiling_clip_count:
+            multiplier_ceiling_clip_excess = (
+                raw_step_multiplier[multiplier_ceiling_clip_mask] - 1.0
+            )
+            multiplier_ceiling_clip_excess_mean = float(
+                np.mean(multiplier_ceiling_clip_excess)
+            )
+            multiplier_ceiling_clip_excess_max = float(
+                np.max(multiplier_ceiling_clip_excess)
+            )
+        else:
+            multiplier_ceiling_clip_excess_mean = 0.0
+            multiplier_ceiling_clip_excess_max = 0.0
         step_pre_trust = alpha * multiplier * grad
         pre_trust_step_norm = float(np.linalg.norm(step_pre_trust))
 
@@ -758,7 +833,20 @@ class DIIWES(StandardES):
             "curv_mean": float(np.mean(curv)),
             "curv_max": float(np.max(curv)),
             "curv_min": float(np.min(curv)),
-            "curvature_active_frac": float(np.mean(curv > 0.0)),
+            "curvature_coordinate_count": curvature_coordinate_count,
+            "curvature_active_count": curvature_active_count,
+            "curvature_active_frac": float(
+                curvature_active_count / curvature_coordinate_count
+            ),
+            "curvature_preclip_mean": float(np.mean(curvature_preclip)),
+            "curvature_preclip_max": float(np.max(curvature_preclip)),
+            "curvature_clip_count": curvature_clip_count,
+            "curvature_clip_frac": float(
+                curvature_clip_count / curvature_coordinate_count
+            ),
+            "curvature_clip_active": bool(curvature_clip_count > 0),
+            "curvature_clip_excess_mean": curvature_clip_excess_mean,
+            "curvature_clip_excess_max": curvature_clip_excess_max,
             "explicit_step_norm": no_curv_pre_trust_step_norm,
             "step_norm_ratio": step_norm_ratio,
             "hessian_shrinkage_median": float(np.median(multiplier)),
@@ -773,6 +861,40 @@ class DIIWES(StandardES):
             "step_multiplier_cv": float(multiplier_std / (multiplier_mean + 1e-12)),
             "step_multiplier_min": float(np.min(multiplier)),
             "step_multiplier_max": float(np.max(multiplier)),
+            "multiplier_coordinate_count": multiplier_coordinate_count,
+            "raw_step_multiplier_min": float(np.min(raw_step_multiplier)),
+            "raw_step_multiplier_max": float(np.max(raw_step_multiplier)),
+            "multiplier_clipping_diagnostics_exact": bool(
+                multiplier_clipping_diagnostics_exact
+            ),
+            "multiplier_floor_clip_count": multiplier_floor_clip_count,
+            "multiplier_floor_clip_frac": float(
+                multiplier_floor_clip_count / multiplier_coordinate_count
+            ),
+            "multiplier_floor_clip_active": bool(
+                multiplier_floor_clip_count > 0
+            ),
+            "multiplier_floor_clip_deficit_mean": (
+                multiplier_floor_clip_deficit_mean
+            ),
+            "multiplier_floor_clip_deficit_max": (
+                multiplier_floor_clip_deficit_max
+            ),
+            "multiplier_ceiling_clip_count": multiplier_ceiling_clip_count,
+            "multiplier_ceiling_clip_frac": float(
+                multiplier_ceiling_clip_count / multiplier_coordinate_count
+            ),
+            "multiplier_ceiling_clip_active": bool(
+                multiplier_ceiling_clip_count > 0
+            ),
+            "multiplier_ceiling_clip_excess_mean": (
+                multiplier_ceiling_clip_excess_mean
+            ),
+            "multiplier_ceiling_clip_excess_max": (
+                multiplier_ceiling_clip_excess_max
+            ),
+            # Legacy at-floor occupancy includes coordinates that naturally
+            # equal the floor; the *_clip_* fields above count interventions.
             "multiplier_floor_frac": float(np.mean(multiplier <= self.min_step_multiplier + 1e-12)),
             "fitness_transform": fitness_transform,
             "curvature_baseline": self._last_curvature_baseline_mode,

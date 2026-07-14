@@ -518,11 +518,18 @@ def _history_record(
 
 
 def _format_progress(record: dict[str, Any], verbose: bool) -> str:
+    clipping = ""
+    if "curvature_clip_frac" in record and "multiplier_floor_clip_frac" in record:
+        clipping = (
+            f" | CurvCap {100.0 * float(record['curvature_clip_frac']):5.1f}%"
+            f" | MultFloor {100.0 * float(record['multiplier_floor_clip_frac']):5.1f}%"
+        )
     if not verbose:
         return (
             f"Iter {record['iteration']:4d} | "
             f"Eval {record['eval_reward']:8.2f} | "
             f"Best {record['best_reward']:8.2f}"
+            f"{clipping}"
         )
     return (
         f"Iter {record['iteration']:4d} | "
@@ -534,6 +541,7 @@ def _format_progress(record: dict[str, Any], verbose: bool) -> str:
         f"Fresh {record['n_fresh']} | "
         f"Reused {record['n_reused']} | "
         f"Time {record['time']:.1f}s"
+        f"{clipping}"
     )
 
 
@@ -547,6 +555,12 @@ def train(
     config = dict(config)
     verbose = bool(verbose or config.get("verbose", False))
     np.random.seed(seed)
+    os.makedirs(output_dir, exist_ok=True)
+    canonical_history_path = os.path.join(output_dir, "history.json")
+    if os.path.exists(canonical_history_path):
+        raise FileExistsError(
+            f"refusing to overwrite completed run artifact: {canonical_history_path}"
+        )
 
     env = _make_env(
         config["env_name"],
@@ -597,6 +611,15 @@ def train(
             f"trust_radius={trust_radius} | lr={base_lr} | schedule={lr_schedule}",
             flush=True,
         )
+
+    # Create the run directory before training so diagnostic records survive a
+    # timeout or interrupted run.  ``history.json`` remains the canonical
+    # completed-run artifact; the append-only JSONL file is the live audit log.
+    with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump({**config, "seed": int(seed)}, f, indent=2)
+    history_jsonl = open(
+        os.path.join(output_dir, "history.jsonl"), "w", encoding="utf-8"
+    )
 
     pool = Pool(processes=n_workers, initializer=_init_worker, initargs=(config,))
     history: list[dict[str, Any]] = []
@@ -702,26 +725,25 @@ def train(
                 eval_env_steps_iter,
             )
             history.append(record)
+            history_jsonl.write(json.dumps(record, separators=(",", ":")) + "\n")
+            history_jsonl.flush()
 
             if iteration % log_interval == 0 or iteration == n_iterations - 1:
                 print(_format_progress(record, verbose), flush=True)
     finally:
+        history_jsonl.close()
         pool.close()
         pool.join()
         env.close()
 
-    os.makedirs(output_dir, exist_ok=True)
     np.save(os.path.join(output_dir, "best_params.npy"), best_params)
     np.save(os.path.join(output_dir, "final_params.npy"), params)
     if hasattr(optimizer, "hessian_ema"):
         np.save(os.path.join(output_dir, "hessian_ema.npy"), optimizer.hessian_ema)
     if obs_normalizer is not None:
         np.savez(os.path.join(output_dir, "obs_norm.npz"), **obs_normalizer.get_state())
-    with open(os.path.join(output_dir, "history.json"), "w", encoding="utf-8") as f:
+    with open(canonical_history_path, "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)
-    with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
-        json.dump({**config, "seed": int(seed)}, f, indent=2)
-
     print(f"Training complete. Best reward: {best_reward:.2f}", flush=True)
     print(f"Results saved to: {output_dir}", flush=True)
     return best_reward, best_params

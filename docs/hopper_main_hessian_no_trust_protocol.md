@@ -55,6 +55,55 @@ the condition block use inverse square root and tasks `20-39` use inverse
 linear; each schedule contains rate 10 (seeds 0-9) followed by rate 30 (seeds
 0-9).
 
+## Clipping diagnostics
+
+Every `diag_curvature` update records exact coordinate-level intervention
+telemetry in both history artifacts. `curvature_coordinate_count`,
+`curvature_active_count`, and `curvature_active_frac` distinguish coordinates
+with active projected geometry from coordinates that actually saturate the
+upper curvature cap. `curvature_preclip_mean` and
+`curvature_preclip_max` describe that projected geometry before the cap.
+Using the strict mask `curvature_preclip > curvature_clip`, the fields
+`curvature_clip_count`, `curvature_clip_frac`, and
+`curvature_clip_active` record the intervention exactly;
+`curvature_clip_excess_mean` and `curvature_clip_excess_max` measure severity
+among clipped coordinates and are zero when the cap is inactive.
+
+The multiplier diagnostics likewise preserve the unclipped values.
+`multiplier_coordinate_count`, `raw_step_multiplier_min`, and
+`raw_step_multiplier_max` describe the solve before the multiplier bounds.
+`multiplier_clipping_diagnostics_exact` must be true; this explicitly limits
+the contract to the locked `dampen` update rather than the separately clipped
+normalized-curvature variants.
+Using the strict mask `raw_step_multiplier < min_step_multiplier`,
+`multiplier_floor_clip_count`, `multiplier_floor_clip_frac`, and
+`multiplier_floor_clip_active` give the exact lower-floor intervention, while
+`multiplier_floor_clip_deficit_mean` and
+`multiplier_floor_clip_deficit_max` measure the deficit among floored
+coordinates and are zero when inactive. The legacy `multiplier_floor_frac`
+remains as a post-clipping at-floor occupancy measure (so exact equality may
+be included), but the strict pre-clipping `*_clip_*` fields are canonical.
+The analogous `multiplier_ceiling_clip_*` fields record any intervention at
+the upper bound of one. They should remain zero in this locked protocol because
+zero scalar damping and nonnegative projected curvature imply a raw multiplier
+no greater than one.
+
+Counts and active flags can be summed to obtain exact clipped-coordinate
+events and active iterations across a run or the full matrix; fractions and
+pre-clipping excess/deficit values retain intervention prevalence and
+severity. Run summaries include both zero-inclusive iteration means and
+count-weighted mean excess/deficit per clipped coordinate-update event. The
+validator summarizes these at run, schedule/rate group, and paired-cell
+levels. Normal progress lines also show `CurvCap` and `MultFloor`
+percentages, but the periodic console output is not the source for exact
+totals.
+
+`history.json` is the canonical artifact for a completed 500-update run.
+`history.jsonl` is flushed after every completed update and preserves the same
+records if a run is interrupted; it supports failure diagnosis but does not
+turn an incomplete run into a valid matrix cell. Training refuses to overwrite
+an output directory that already contains a completed `history.json`.
+
 ## Launch guard
 
 Every Slurm task must receive `PAPER_EXPECTED_SOURCE_SHA` and independently
