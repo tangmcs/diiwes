@@ -105,7 +105,7 @@ class SweepFixture:
                         "curvature_mode": "diag",
                         "curvature_step_mode": "dampen",
                         "curvature_fitness": "raw",
-                        "lambda": 0.1,
+                        "lambda": 0.0,
                         "reuse_fraction": 0.0,
                         "buffer_size": 0,
                         "used_replay": False,
@@ -224,7 +224,7 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
         self.assertEqual(EXPECTED_DIAG_CONFIG["reuse_fraction"], 0.0)
         self.assertEqual(EXPECTED_DIAG_CONFIG["buffer_size"], 0)
         self.assertEqual(EXPECTED_DIAG_CONFIG["curvature_fitness"], "raw")
-        self.assertEqual(EXPECTED_DIAG_CONFIG["implicit_damping"], 0.1)
+        self.assertEqual(EXPECTED_DIAG_CONFIG["implicit_damping"], 0.0)
         self.assertEqual(EXPECTED_DIAG_CONFIG["curvature_beta"], 0.99)
         self.assertEqual(EXPECTED_DIAG_CONFIG["curvature_clip"], 1000.0)
         self.assertEqual(EXPECTED_DIAG_CONFIG["min_step_multiplier"], 0.05)
@@ -275,6 +275,7 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
                 noise_std=0.02,
                 buffer_size=0,
                 reuse_fraction=0.0,
+                implicit_damping=0.0,
                 trust_radius=None,
                 seed=0,
             )
@@ -367,6 +368,7 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
         mutations = (
             ("history", lambda history: history[1].__setitem__("lr", 10.0), "lr deviates"),
             ("config", lambda config: config.__setitem__("reuse_fraction", 0.2), "reuse_fraction"),
+            ("config", lambda config: config.__setitem__("implicit_damping", 0.1), "implicit_damping"),
             ("config", lambda config: config.__setitem__("source_sha256", "b" * 64), "source digest"),
             ("config", lambda config: config.pop("trust_radius"), "explicit null"),
         )

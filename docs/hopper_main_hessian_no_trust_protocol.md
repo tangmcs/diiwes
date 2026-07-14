@@ -29,6 +29,9 @@ result for the main Hessian algorithm.
 - Replay: disabled with both `reuse_fraction: 0` and `buffer_size: 0`. No old
   candidate receives an importance weight or enters the gradient/Hessian
   estimate.
+- Scalar damping: disabled with `implicit_damping: 0`. The update therefore
+  uses geometry only through `1 / (1 + alpha_t c_{t,j})`, before the existing
+  multiplier clipping.
 - Learning rates: `alpha_t = alpha_0 / sqrt(t + 1)` and
   `alpha_t = alpha_0 / (t + 1)`, with `alpha_0` in `{10, 30}`.
 - Seeds: `0` through `9`, paired by condition within each schedule/rate cell.
@@ -36,13 +39,14 @@ result for the main Hessian algorithm.
 - Trust radius: explicitly `none` for every run.
 
 The launcher changes only condition, seed, population size, replay settings,
-initial learning rate, learning-rate schedule, and the requested trust
-setting. All other algorithm and experiment settings retain `main` behavior
-from the original Hopper config. In particular, `diag_curvature` still has
-the main implementation's raw-return diagonal curvature, scalar damping,
-curvature clipping, EMA, and multiplier-floor semantics; only replay and trust
-are removed. Accordingly, this is a fresh-only comparison of the two named
-main conditions, not a newly substituted Hessian solver.
+scalar damping, initial learning rate, learning-rate schedule, and the
+requested trust setting. All other algorithm and experiment settings retain
+`main` behavior from the original Hopper config. In particular,
+`diag_curvature` still has the main implementation's raw-return diagonal
+curvature, curvature clipping, EMA, and multiplier-floor semantics; replay,
+trust, and the geometry-free scalar damping term are removed. Accordingly,
+this is a fresh-only comparison using the main Hessian estimator/update form,
+not a newly substituted Hessian solver.
 
 The array has exactly 80 tasks. Seed is the fastest-changing index: tasks
 `0-39` are Standard ES, tasks `40-79` are diagonal curvature, and matched
@@ -78,7 +82,7 @@ training. After all 80 tasks finish, validate and summarize the matched matrix:
 
 ```bash
 python scripts/summarize_hopper_hessian_no_trust.py \
-  results/hopper_main_hessian_fresh_no_trust_pop500_<jobid> \
+  results/hopper_main_hessian_fresh_no_trust_no_scalar_damping_pop500_<jobid> \
   --expected-source-sha "$SOURCE_SHA"
 ```
 

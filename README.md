@@ -43,8 +43,9 @@ and applies the decreasing sequences `alpha_0 / sqrt(t + 1)` and
 `alpha_0 / (t + 1)` for `alpha_0` in `{10, 30}`. The Standard ES arm is kept
 as the required matched control. The population is increased from 200 to 500
 to improve Hessian-estimate stability. Replay is fully disabled
-(`reuse_fraction=0`, `buffer_size=0`); Picard, replacement Hessian solvers,
-trust variants, and optimizer-development arms are excluded.
+(`reuse_fraction=0`, `buffer_size=0`), and geometry-free scalar damping is
+removed (`implicit_damping=0`). Picard, replacement Hessian solvers, trust
+variants, and optimizer-development arms are excluded.
 
 See [the locked protocol](docs/hopper_main_hessian_no_trust_protocol.md), the
 Slurm launcher `scripts/submit_hopper_main_hessian_no_trust.sh`, and the strict
