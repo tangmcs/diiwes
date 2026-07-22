@@ -2138,7 +2138,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output-dir",
-        default="results/implicit_quadratic_optimization_benchmark",
+        default="reports/implicit_quadratic_optimization_benchmark",
     )
     parser.add_argument("--dimension", type=int, default=12)
     parser.add_argument("--num-blocks", type=int, default=3)

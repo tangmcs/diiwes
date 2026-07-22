@@ -10,8 +10,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HOPPER = ROOT / "scripts" / "submit_hopper_low_lr_long_sweep.sh"
-CONVEX = ROOT / "scripts" / "submit_convex_implicit_step_sweep.sh"
+HOPPER = ROOT / "scripts" / "slurm" / "submit_hopper_low_lr_long_sweep.sh"
+CONVEX = ROOT / "scripts" / "slurm" / "submit_convex_implicit_step_sweep.sh"
 
 
 class LauncherProtocolTests(unittest.TestCase):

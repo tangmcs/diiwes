@@ -39,7 +39,7 @@ class NonlinearCartPoleBenchmarkTests(unittest.TestCase):
 
     def test_slurm_launcher_is_locked_and_direct_execution_is_dry(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        launcher = root / "scripts" / "submit_nonlinear_cartpole_300.sh"
+        launcher = root / "scripts" / "slurm" / "submit_nonlinear_cartpole_300.sh"
         environment = os.environ.copy()
         for name in ("SLURM_JOB_ID", "SLURM_JOB_NAME", "PAPER_EXPECTED_SOURCE_SHA"):
             environment.pop(name, None)

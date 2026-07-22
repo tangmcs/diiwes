@@ -56,12 +56,12 @@ fi
 PROTOCOL_VARIANT=${PAPER_PROTOCOL_VARIANT:-baseline}
 case "$PROTOCOL_VARIANT" in
   baseline)
-    CONFIG=configs/mujuco/hopper_pginit_noema_1000pairs.yaml
+    CONFIG=configs/mujoco/hopper_pginit_noema_1000pairs.yaml
     LEARNING_RATE=0.16
     OUTPUT_PREFIX=hopper_pginit_noema_pairs1000_iter300_seed0
     ;;
   high_lr0p5)
-    CONFIG=configs/mujuco/hopper_pginit_noema_lr0p5_1000pairs.yaml
+    CONFIG=configs/mujoco/hopper_pginit_noema_lr0p5_1000pairs.yaml
     LEARNING_RATE=0.5
     OUTPUT_PREFIX=hopper_pginit_noema_lr0p5_pairs1000_iter300_seed0
     ;;

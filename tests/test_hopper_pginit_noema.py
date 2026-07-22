@@ -22,8 +22,8 @@ from utilities import ObsNormalizer
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs" / "mujuco" / "hopper_pginit_noema_1000pairs.yaml"
-HIGH_LR_CONFIG = ROOT / "configs" / "mujuco" / "hopper_pginit_noema_lr0p5_1000pairs.yaml"
+CONFIG = ROOT / "configs" / "mujoco" / "hopper_pginit_noema_1000pairs.yaml"
+HIGH_LR_CONFIG = ROOT / "configs" / "mujoco" / "hopper_pginit_noema_lr0p5_1000pairs.yaml"
 
 
 class TestHopperPGInitialization(unittest.TestCase):

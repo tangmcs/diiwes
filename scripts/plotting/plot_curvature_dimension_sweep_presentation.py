@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if "MPLCONFIGDIR" not in os.environ:
     mpl_dir = Path(tempfile.gettempdir()) / f"diiwes-mpl-{os.getuid()}"
     mpl_dir.mkdir(parents=True, exist_ok=True)
@@ -58,6 +58,19 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _logical_absolute(path: Path) -> Path:
+    """Make a path absolute without resolving the repository's artifact links."""
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _repo_relative_or_absolute(path: Path) -> str:
+    """Prefer a stable repository-relative path, but permit external inputs."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def _save_figure(fig: Any, path: Path, *, dpi: int | None = None) -> None:
@@ -709,14 +722,14 @@ curvature sample-size sweep.
 Regenerate from the repository root with:
 
 ```bash
-python scripts/plot_curvature_dimension_sweep_presentation.py
+python scripts/plotting/plot_curvature_dimension_sweep_presentation.py
 ```
 """
 
 
 def build_package(input_dir: Path, output_dir: Path) -> dict[str, Any]:
-    input_dir = input_dir.resolve()
-    output_dir = output_dir.resolve()
+    input_dir = _logical_absolute(input_dir)
+    output_dir = _logical_absolute(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "figures").mkdir(parents=True, exist_ok=True)
 
@@ -781,9 +794,9 @@ def build_package(input_dir: Path, output_dir: Path) -> dict[str, Any]:
         "package_version": "1.0.0",
         "created_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "purpose": "PPT-ready sources for curvature sample size across dimensions",
-        "source_directory": str(input_dir.relative_to(REPO_ROOT)),
-        "source_experiment_manifest": str(
-            (input_dir / "experiment_manifest.json").relative_to(REPO_ROOT)
+        "source_directory": _repo_relative_or_absolute(input_dir),
+        "source_experiment_manifest": _repo_relative_or_absolute(
+            input_dir / "experiment_manifest.json"
         ),
         "plot_contract": {
             "question": "How does curvature-estimation error vary with pair count and dimension?",
@@ -801,7 +814,7 @@ def build_package(input_dir: Path, output_dir: Path) -> dict[str, Any]:
             "matplotlib": matplotlib.__version__,
         },
         "plot_script": {
-            "path": str(Path(__file__).resolve().relative_to(REPO_ROOT)),
+            "path": _repo_relative_or_absolute(Path(__file__).resolve()),
             "sha256": _sha256(Path(__file__).resolve()),
         },
         "files": file_records,
@@ -824,7 +837,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "presentation" / "curvature_sample_size",
+        default=REPO_ROOT / "figures" / "curvature_sample_size",
     )
     return parser.parse_args(argv)
 

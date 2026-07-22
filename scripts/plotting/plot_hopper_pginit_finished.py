@@ -378,7 +378,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("presentation/hopper_pginit_noema/figures"),
+        default=Path("figures/hopper_pginit_noema"),
     )
     return parser.parse_args(argv)
 

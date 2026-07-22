@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.summarize_hopper_pginit_noema import summarize
+from scripts.analysis.summarize_hopper_pginit_noema import summarize
 
 
 class TestHopperPGComparisonSummary(unittest.TestCase):

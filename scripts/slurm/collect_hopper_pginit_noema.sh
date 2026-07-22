@@ -33,7 +33,7 @@ elif [ "$RUNNING_UNDER_SLURM" = "1" ]; then
   exit 2
 fi
 
-COMMAND=(python scripts/summarize_hopper_pginit_noema.py --root "$OUTPUT_ROOT")
+COMMAND=(python -m scripts.analysis.summarize_hopper_pginit_noema --root "$OUTPUT_ROOT")
 echo "Comparison input/output root: $OUTPUT_ROOT"
 if [ "$RUNNING_UNDER_SLURM" = "0" ] || [ "${PAPER_DRY_RUN:-0}" = "1" ]; then
   printf 'DRY RUN command:'

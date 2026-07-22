@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from experiments import implicit_quadratic_optimization_benchmark as benchmark
-from scripts import analyze_plot_convex_estimated_hessian as analysis
+from scripts.plotting import analyze_plot_convex_estimated_hessian as analysis
 
 
 def _write_quick_artifact(

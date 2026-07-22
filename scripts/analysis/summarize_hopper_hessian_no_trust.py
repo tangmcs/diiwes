@@ -43,7 +43,7 @@ EXPECTED_PARAMETER_COUNT = 5123
 HESSIAN_FOR_STEP_HISTORY_FILENAME = "hessian_for_step_history.npy"
 STEP_MULTIPLIER_HISTORY_FILENAME = "step_multiplier_history.npy"
 
-# Values inherited from configs/mujuco/hopper.yaml on main, with the requested
+# Values inherited from configs/mujoco/hopper.yaml on main, with the requested
 # population increase and fresh-only replay overrides. Keeping these locked
 # makes the Hessian arm an interpretable change to Standard ES instead of
 # another optimizer redesign.
@@ -1806,7 +1806,7 @@ def validate_and_collect(
     return [rows[candidates[cell][0]] for cell in expected_order]
 
 
-# Compatibility with the naming used by scripts/summarize_no_trust_sweep.py.
+# Compatibility with the naming used by the archived no-trust summarizer.
 validate_and_collect_runs = validate_and_collect
 
 

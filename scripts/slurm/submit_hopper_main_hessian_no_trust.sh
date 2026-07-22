@@ -53,7 +53,7 @@ elif [ "$RUNNING_UNDER_SLURM" = "1" ]; then
   exit 2
 fi
 
-CONFIG=configs/mujuco/hopper.yaml
+CONFIG=configs/mujoco/hopper.yaml
 POPULATION_SIZE=500
 BUFFER_SIZE=0
 REUSE_FRACTION=0

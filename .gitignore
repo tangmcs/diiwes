@@ -1,21 +1,11 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
-Problem_to_fix/
-plots/
-scripts/summarize.py
-scripts/analyze_mujoco_results.py
-# One-off local artifact relocation helpers.
-scripts/archive_hopper_pginit_to_presentation.py
-scripts/archive_hopper_pginit_to_presentation.sh
-job_outputs/
-results/
+
+# Personal notes and all generated output stay local to the DCC workspace.
+/docs/
+/archive
+/figures
 /job_outputs
+/reports
 /results
-/presentation/
-/reports/
-figures/
-analysis/
-slurm/
-plots/*.csv
-plots/README.md

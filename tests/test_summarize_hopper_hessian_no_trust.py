@@ -13,7 +13,7 @@ import numpy as np
 from core.diiwes import DIIWES
 from experiments.train import _history_record
 
-from scripts.summarize_hopper_hessian_no_trust import (
+from scripts.analysis.summarize_hopper_hessian_no_trust import (
     CONDITIONS,
     EXPECTED_COMMON_CONFIG,
     EXPECTED_DIAG_CONFIG,

@@ -63,12 +63,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--runs-csv",
         type=Path,
-        default=Path("reports/hopper_main_hessian_no_trust_49811294/runs.csv"),
+        default=Path(
+            "reports/hopper_main_hessian_no_trust_49811294/runs.csv"
+        ),
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("reports/hopper_main_hessian_no_trust_49811294/figures"),
+        default=Path("figures/reports/hopper_main_hessian_no_trust_49811294"),
     )
     parser.add_argument("--smooth-window", type=int, default=25)
     return parser.parse_args()
