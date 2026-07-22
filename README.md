@@ -10,10 +10,34 @@ This repository contains the reference implementation for the DIIWES paper exper
   - `policies.py`: NumPy MLP policies and layer-slice helpers.
 - `utilities/`: shared utilities such as observation normalization.
 - `experiments/`: runnable training entry points.
-- `configs/`: experiment configuration files, split into `configs/mujuco/` and `configs/atari/`.
-- `plots/`: paper figures and generated table fragments.
+  - `nonlinear_cartpole/`: policy-gradient warm-start benchmark on nonlinear
+    CartPole dynamics, followed by matched Standard ES and DIIWES fine-tuning.
+  - `curvature_sample_size/`: controlled linear and nonlinear validation of
+    diagonal curvature-estimation error versus antithetic sample size.
+- `configs/`: experiment configuration files, split into `configs/mujoco/` and `configs/atari/`.
+- `scripts/`: standalone tooling, separated into `analysis/`, `plotting/`, and
+  `slurm/`; see [`scripts/README.md`](scripts/README.md).
+- `reports/`: generated analysis packages stored on DCC `/work` and ignored by
+  Git; compatibility links preserve each report's relative figure paths.
+- `figures/`: the central collection of standalone, presentation-ready, and
+  migrated report figures, grouped by study and stored on DCC `/work`.
 
-Generated outputs live in `results/` and `job_outputs/`; both are ignored by git.
+Raw experiment outputs live in `results/`, and scheduler logs live in
+`job_outputs/`. Both paths point to DCC `/work` storage and are ignored by git.
+Historical material lives in the ignored, `/work`-backed `archive/` directory.
+There is intentionally no top-level `plots/` directory: maintained plotting
+code is in `scripts/plotting/`, while standalone generated images are under
+`figures/`. Current paths such as `reports/<study>/figures/` are compatibility
+links into that central figure tree so existing report HTML and TeX continue
+to resolve. Plotting embedded in a new self-contained experiment may initially
+write inside its report package.
+
+On a fresh DCC clone, initialize the unversioned storage directories and links
+with `bash scripts/maintenance/setup_dcc_storage.sh`.
+
+DCC `/work` is scratch storage: it is not backed up, and files older than 75
+days are automatically purged. Copy irreplaceable final results to persistent
+storage; see Duke's [DCC storage documentation](https://oit-rc.pages.oit.duke.edu/rcsupportdocs/storage/).
 
 ## Experimental Conditions
 
@@ -35,66 +59,40 @@ The clean comparisons are:
 - `standard_es`: plain ES baseline.
 - `standard_es_trust`: standard ES with the same trust-radius clipping interface.
 
+## Mentor-requested no-trust Hessian rerun
+
+The focused Hopper rerun compares only the original `main` conditions
+`standard_es` and `diag_curvature`. It explicitly disables the trust radius
+and applies the decreasing sequences `alpha_0 / sqrt(t + 1)` and
+`alpha_0 / (t + 1)` for `alpha_0` in `{10, 30}`. The Standard ES arm is kept
+as the required matched control. The population is increased from 200 to 500
+to improve Hessian-estimate stability. Replay is fully disabled
+(`reuse_fraction=0`, `buffer_size=0`), and geometry-free scalar damping is
+removed (`implicit_damping=0`). Picard, replacement Hessian solvers, trust
+variants, and optimizer-development arms are excluded.
+
+The active entry points are the Slurm launcher
+`scripts/slurm/submit_hopper_main_hessian_no_trust.sh` and the strict validator
+`scripts/analysis/summarize_hopper_hessian_no_trust.py`.
+
 By default, DIIWES estimates Stein curvature on the raw return scale. Use
 `--curvature-fitness standardized` only for compatibility checks against the
 older standardized-return estimator.
 
-## Paper Result Artifacts
+## Reports and plots
 
-The current balanced MuJoCo learning-rate sweep is exported as a long-format
-table and then summarized into LaTeX fragments and figures for the paper.
+Standalone analysis, plotting, and Slurm entry points have one maintained home
+under `scripts/`. New generated material should be written beneath
+`reports/<study>/` or `figures/<study>/`. Report-facing figure links remain at
+`reports/<study>/figures/`; for the migrated report packages, their image files
+live under
+`figures/reports/<study>/`. This preserves report-relative links without
+duplicating the images.
 
-```bash
-python scripts/export_plot_table.py \
-  results/mujoco_lr_sweep_46638567 \
-  --output plots/mujoco_lr_sweep_46638567_plot_table.csv
-
-python scripts/analyze_mujoco_results.py \
-  --input plots/mujoco_lr_sweep_46638567_plot_table.csv \
-  --out-dir plots \
-  --env-step-lr 0.02
-```
-
-The analysis command writes:
-
-- `plots/mujoco_experiments_section_draft.tex`
-- `plots/mujoco_best_return_table.tex`
-- `plots/mujoco_robustness_table.tex`
-- `plots/mujoco_diagnostics_summary.tex`
-- `plots/mujoco_env_step_learning_curves_lr0p02.{png,pdf}`
-
-The no-curvature ablation needed to isolate the diagonal Stein-curvature term
-can be launched as a separate Slurm array:
-
-```bash
-sbatch slurm/mujoco_no_curvature_lr_sweep.sh
-```
-
-Direct shell execution of that Slurm script defaults to a dry run; set
-`PAPER_DRY_RUN=0` only when intentionally running one local task.
-
-After the array finishes, export its histories with the existing collector:
-
-```bash
-PAPER_OUTPUT_ROOT=results/mujoco_no_curvature_lr_sweep_<jobid> \
-PAPER_PLOT_OUTPUT=plots/mujoco_no_curvature_lr_sweep_<jobid>_plot_table.csv \
-sbatch slurm/collect_mujoco_lr_sweep.sh
-```
-
-Then regenerate the paper artifacts by merging the main sweep and the
-no-curvature ablation sweep:
-
-```bash
-python scripts/analyze_mujoco_results.py \
-  --input plots/mujoco_lr_sweep_46638567_plot_table.csv \
-  --input plots/mujoco_no_curvature_lr_sweep_<jobid>_plot_table.csv \
-  --out-dir plots \
-  --env-step-lr 0.02
-```
-
-When the merged table contains `DIIWES-no-H`, the analysis script also writes
-`plots/mujoco_hessian_ablation_lr_robustness.{png,pdf}` and includes the
-Hessian-ablation figure in `plots/mujoco_experiments_section_draft.tex`.
+The former top-level MuJoCo plot snapshots and their retired generation tools
+are retained under `archive/analysis/` for provenance. Those figures
+come from a trust-confounded sweep: they are historical evidence, not the
+canonical Hessian comparison and not an active reproduction workflow.
 
 ## Local Execution
 
@@ -102,7 +100,7 @@ All commands below assume they are run from this repository root.
 
 ```bash
 python experiments/train.py \
-  --config configs/mujuco/hopper.yaml \
+  --config configs/mujoco/hopper.yaml \
   --condition diag_curvature \
   --learning-rate 0.02 \
   --seed 0 \
@@ -120,7 +118,7 @@ The same training entry point can be used to run multiple seeds and conditions l
 for condition in standard_es no_curvature diag_curvature; do
   for seed in 0 1 2; do
     python experiments/train.py \
-      --config configs/mujuco/hopper.yaml \
+      --config configs/mujoco/hopper.yaml \
       --condition "$condition" \
       --learning-rate 0.02 \
       --seed "$seed" \
@@ -141,3 +139,36 @@ python experiments/train.py \
   --workers 8 \
   --output results/pong_diag_curvature_seed0
 ```
+
+## Nonlinear policy-gradient initialization benchmark
+
+The low-cost nonlinear benchmark adapts the PPO-initialization idea from
+[Wang, Zhang, and Ying (2026)](https://arxiv.org/abs/2604.17747) without its
+human-feedback or federated layers.
+It compares random initialization with a REINFORCE/Adam first stage, then runs
+the checked-out Standard ES and diagonal-curvature DIIWES implementations from
+the same matched initial policies. The locked nonlinear protocol uses 300 ES
+updates and 250 antithetic perturbation pairs (500 candidate policies) per
+update:
+
+```bash
+python -m experiments.nonlinear_cartpole.benchmark
+```
+
+See `experiments/nonlinear_cartpole/README.md` for the protocol and smoke-run
+options. The default report is written to
+`reports/nonlinear_cartpole_warm_start/`.
+
+## Curvature sample-size validation
+
+The isolated curvature study calls the current DIIWES estimator directly and
+compares it with analytic Gaussian-smoothed Hessian targets on nonlinear and
+linear functions:
+
+```bash
+python -m experiments.curvature_sample_size.benchmark
+```
+
+Raw repetitions, aggregate error curves, validation checks, and the report
+payload are kept separately in `reports/curvature_sample_size/`. See
+`experiments/curvature_sample_size/README.md` for the protocol.
