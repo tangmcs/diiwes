@@ -19,9 +19,11 @@ from scripts.summarize_hopper_hessian_no_trust import (
     EXPECTED_DIAG_CONFIG,
     EXPECTED_PARAMETER_COUNT,
     EXPECTED_POPULATION_SIZE,
+    HESSIAN_FOR_STEP_HISTORY_FILENAME,
     INITIAL_LEARNING_RATES,
     LR_SCHEDULES,
     SEEDS,
+    STEP_MULTIPLIER_HISTORY_FILENAME,
     HessianSweepValidationError,
     _production_task_id,
     aggregate,
@@ -69,13 +71,136 @@ class SweepFixture:
         return config
 
     @staticmethod
+    def coordinate_histories(
+        schedule: str,
+        alpha0: float,
+        iterations: int,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        hessian_history = np.zeros(
+            (iterations, EXPECTED_PARAMETER_COUNT), dtype=np.float64
+        )
+        multiplier_history = np.ones_like(hessian_history)
+        for iteration in range(iterations):
+            preclip = np.zeros(EXPECTED_PARAMETER_COUNT, dtype=np.float64)
+            preclip[:2000] = 0.1 * (iteration + 1)
+            if iteration == 2:
+                excess = np.full(10, 150.0 / 9.0, dtype=np.float64)
+                excess[0] = 50.0
+                preclip[:10] = 1000.0 + excess
+            hessian_history[iteration] = -preclip
+            lr = learning_rate_at_iteration(alpha0, iteration, schedule)
+            curvature = np.clip(preclip, 0.0, 1000.0)
+            raw_multiplier = 1.0 / (1.0 + lr * curvature)
+            multiplier_history[iteration] = np.clip(raw_multiplier, 0.05, 1.0)
+        return hessian_history, multiplier_history
+
+    @staticmethod
+    def coordinate_diagnostics(
+        hessian_for_step: np.ndarray,
+        learning_rate: float,
+    ) -> dict[str, object]:
+        preclip = np.maximum(-hessian_for_step, 0.0)
+        active_mask = preclip > 0.0
+        clip_mask = preclip > 1000.0
+        curvature = np.clip(preclip, 0.0, 1000.0)
+        linear_diagonal = 1.0 + learning_rate * curvature
+        raw_multiplier = 1.0 / linear_diagonal
+        multiplier = np.clip(raw_multiplier, 0.05, 1.0)
+
+        clip_count = int(np.count_nonzero(clip_mask))
+        if clip_count:
+            excess = preclip[clip_mask] - 1000.0
+            excess_mean = float(np.mean(excess))
+            excess_max = float(np.max(excess))
+        else:
+            excess_mean = 0.0
+            excess_max = 0.0
+
+        floor_mask = raw_multiplier < 0.05
+        floor_count = int(np.count_nonzero(floor_mask))
+        if floor_count:
+            deficit = 0.05 - raw_multiplier[floor_mask]
+            deficit_mean = float(np.mean(deficit))
+            deficit_max = float(np.max(deficit))
+        else:
+            deficit_mean = 0.0
+            deficit_max = 0.0
+
+        ceiling_mask = raw_multiplier > 1.0
+        ceiling_count = int(np.count_nonzero(ceiling_mask))
+        if ceiling_count:
+            ceiling_excess = raw_multiplier[ceiling_mask] - 1.0
+            ceiling_excess_mean = float(np.mean(ceiling_excess))
+            ceiling_excess_max = float(np.max(ceiling_excess))
+        else:
+            ceiling_excess_mean = 0.0
+            ceiling_excess_max = 0.0
+
+        active_count = int(np.count_nonzero(active_mask))
+        multiplier_mean = float(np.mean(multiplier))
+        multiplier_std = float(np.std(multiplier))
+        return {
+            "h_step_mean": float(np.mean(hessian_for_step)),
+            "h_step_min": float(np.min(hessian_for_step)),
+            "h_step_max": float(np.max(hessian_for_step)),
+            "linear_condition_estimate": float(
+                np.max(linear_diagonal) / np.min(linear_diagonal)
+            ),
+            "linear_min_abs_diagonal": float(np.min(linear_diagonal)),
+            "linear_max_abs_diagonal": float(np.max(linear_diagonal)),
+            "curvature_coordinate_count": EXPECTED_PARAMETER_COUNT,
+            "curvature_active_count": active_count,
+            "curvature_active_frac": active_count / EXPECTED_PARAMETER_COUNT,
+            "curvature_preclip_mean": float(np.mean(preclip)),
+            "curvature_preclip_max": float(np.max(preclip)),
+            "curvature_clip_count": clip_count,
+            "curvature_clip_frac": clip_count / EXPECTED_PARAMETER_COUNT,
+            "curvature_clip_active": clip_count > 0,
+            "curvature_clip_excess_mean": excess_mean,
+            "curvature_clip_excess_max": excess_max,
+            "curv_mean": float(np.mean(curvature)),
+            "curv_min": float(np.min(curvature)),
+            "curv_max": float(np.max(curvature)),
+            "multiplier_coordinate_count": EXPECTED_PARAMETER_COUNT,
+            "raw_step_multiplier_min": float(np.min(raw_multiplier)),
+            "raw_step_multiplier_max": float(np.max(raw_multiplier)),
+            "multiplier_clipping_diagnostics_exact": True,
+            "multiplier_floor_clip_count": floor_count,
+            "multiplier_floor_clip_frac": floor_count / EXPECTED_PARAMETER_COUNT,
+            "multiplier_floor_clip_active": floor_count > 0,
+            "multiplier_floor_clip_deficit_mean": deficit_mean,
+            "multiplier_floor_clip_deficit_max": deficit_max,
+            "multiplier_ceiling_clip_count": ceiling_count,
+            "multiplier_ceiling_clip_frac": ceiling_count / EXPECTED_PARAMETER_COUNT,
+            "multiplier_ceiling_clip_active": ceiling_count > 0,
+            "multiplier_ceiling_clip_excess_mean": ceiling_excess_mean,
+            "multiplier_ceiling_clip_excess_max": ceiling_excess_max,
+            "step_multiplier_min": float(np.min(multiplier)),
+            "step_multiplier_max": float(np.max(multiplier)),
+            "step_multiplier_mean": multiplier_mean,
+            "step_multiplier_std": multiplier_std,
+            "step_multiplier_cv": multiplier_std / (multiplier_mean + 1e-12),
+            "hessian_shrinkage_median": float(np.median(multiplier)),
+            "hessian_shrinkage_p90": float(np.percentile(multiplier, 90.0)),
+            "hessian_shrinkage_max": float(np.max(multiplier)),
+            "multiplier_floor_frac": float(np.mean(multiplier <= 0.05 + 1e-12)),
+        }
+
+    @classmethod
     def history(
+        cls,
         condition: str,
         schedule: str,
         alpha0: float,
         seed: int,
         iterations: int,
+        *,
+        hessian_history: np.ndarray | None = None,
     ) -> list[dict[str, object]]:
+        if condition == "diag_curvature" and hessian_history is None:
+            hessian_history, _ = cls.coordinate_histories(
+                schedule, alpha0, iterations
+            )
         offset = 5.0 if condition == "diag_curvature" else 0.0
         records: list[dict[str, object]] = []
         best = float("-inf")
@@ -101,26 +226,7 @@ class SweepFixture:
                 "trust_scale": 1.0,
             }
             if condition == "diag_curvature":
-                curvature_clip_count = 10 if iteration == 2 else 0
-                curvature_clip_frac = curvature_clip_count / 5123.0
-                curvature_preclip_mean = 3.0 if iteration == 2 else 0.2 + 0.1 * iteration
-                curvature_preclip_max = 1050.0 if iteration == 2 else 1.0 + 0.5 * iteration
-                curvature_excess_mean = 20.0 if iteration == 2 else 0.0
-                curvature_excess_max = 50.0 if iteration == 2 else 0.0
-                clipped_curvature_mean = (
-                    curvature_preclip_mean
-                    - curvature_clip_count * curvature_excess_mean / 5123.0
-                )
-                clipped_curvature_max = min(curvature_preclip_max, 1000.0)
-                linear_max = 1.0 + lr * clipped_curvature_max
-                raw_multiplier_min = 1.0 / linear_max
-                floor_clip_count = (
-                    15 if iteration == 2 else int(raw_multiplier_min < 0.05)
-                )
-                floor_clip_frac = floor_clip_count / 5123.0
-                floor_deficit_max = (
-                    0.05 - raw_multiplier_min if floor_clip_count else 0.0
-                )
+                assert hessian_history is not None
                 record.update(
                     {
                         "curvature_mode": "diag",
@@ -144,44 +250,10 @@ class SweepFixture:
                         "h_split_relative_disagreement": 1.2,
                         "division_relative_residual": 1e-16,
                         "applied_relative_residual": 0.1 * iteration,
-                        "linear_condition_estimate": linear_max,
-                        "linear_min_abs_diagonal": 1.0,
-                        "linear_max_abs_diagonal": linear_max,
-                        "curvature_coordinate_count": 5123,
-                        "curvature_active_count": 2000,
-                        "curvature_active_frac": 2000.0 / 5123.0,
-                        "curvature_preclip_mean": curvature_preclip_mean,
-                        "curvature_preclip_max": curvature_preclip_max,
-                        "curvature_clip_count": curvature_clip_count,
-                        "curvature_clip_frac": curvature_clip_frac,
-                        "curvature_clip_active": curvature_clip_count > 0,
-                        "curvature_clip_excess_mean": curvature_excess_mean,
-                        "curvature_clip_excess_max": curvature_excess_max,
-                        "curv_mean": clipped_curvature_mean,
-                        "curv_min": 0.0,
-                        "curv_max": clipped_curvature_max,
-                        "multiplier_coordinate_count": 5123,
-                        "raw_step_multiplier_min": raw_multiplier_min,
-                        "raw_step_multiplier_max": 1.0,
-                        "multiplier_clipping_diagnostics_exact": True,
-                        "multiplier_floor_clip_count": floor_clip_count,
-                        "multiplier_floor_clip_frac": floor_clip_frac,
-                        "multiplier_floor_clip_active": floor_clip_count > 0,
-                        "multiplier_floor_clip_deficit_mean": (
-                            0.03
-                            if iteration == 2
-                            else floor_deficit_max
-                        ),
-                        "multiplier_floor_clip_deficit_max": floor_deficit_max,
-                        "multiplier_ceiling_clip_count": 0,
-                        "multiplier_ceiling_clip_frac": 0.0,
-                        "multiplier_ceiling_clip_active": False,
-                        "multiplier_ceiling_clip_excess_mean": 0.0,
-                        "multiplier_ceiling_clip_excess_max": 0.0,
-                        "step_multiplier_min": max(raw_multiplier_min, 0.05),
-                        "step_multiplier_max": 1.0,
-                        "multiplier_floor_frac": floor_clip_frac,
                     }
+                )
+                record.update(
+                    cls.coordinate_diagnostics(hessian_history[iteration], lr)
                 )
                 if iteration > 0:
                     record.update(
@@ -212,10 +284,35 @@ class SweepFixture:
             f"job{job_id}_task{task_id}",
         )
         os.makedirs(run_dir)
+        hessian_history: np.ndarray | None = None
+        multiplier_history: np.ndarray | None = None
+        if condition == "diag_curvature":
+            hessian_history, multiplier_history = cls.coordinate_histories(
+                schedule, alpha0, iterations
+            )
         with open(os.path.join(run_dir, "config.json"), "w", encoding="utf-8") as stream:
             json.dump(cls.config(condition, schedule, alpha0, seed, iterations), stream)
         with open(os.path.join(run_dir, "history.json"), "w", encoding="utf-8") as stream:
-            json.dump(cls.history(condition, schedule, alpha0, seed, iterations), stream)
+            json.dump(
+                cls.history(
+                    condition,
+                    schedule,
+                    alpha0,
+                    seed,
+                    iterations,
+                    hessian_history=hessian_history,
+                ),
+                stream,
+            )
+        if hessian_history is not None and multiplier_history is not None:
+            np.save(
+                os.path.join(run_dir, HESSIAN_FOR_STEP_HISTORY_FILENAME),
+                hessian_history,
+            )
+            np.save(
+                os.path.join(run_dir, STEP_MULTIPLIER_HISTORY_FILENAME),
+                multiplier_history,
+            )
         return run_dir
 
     @classmethod
@@ -284,6 +381,139 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
         self.assertEqual(EXPECTED_DIAG_CONFIG["curvature_clip"], 1000.0)
         self.assertEqual(EXPECTED_DIAG_CONFIG["min_step_multiplier"], 0.05)
 
+    def test_coordinate_artifacts_are_required_only_for_diagonal_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            SweepFixture.write_run(
+                root,
+                condition="standard_es",
+                schedule="inverse_sqrt",
+                alpha0=10.0,
+                seed=0,
+            )
+            rows = self._validate_one(root, condition="standard_es")
+            self.assertEqual(len(rows), 1)
+
+        for filename in (
+            HESSIAN_FOR_STEP_HISTORY_FILENAME,
+            STEP_MULTIPLIER_HISTORY_FILENAME,
+        ):
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as root:
+                run_dir = SweepFixture.write_run(
+                    root,
+                    condition="diag_curvature",
+                    schedule="inverse_sqrt",
+                    alpha0=10.0,
+                    seed=0,
+                )
+                os.unlink(os.path.join(run_dir, filename))
+                with self.assertRaises(HessianSweepValidationError) as caught:
+                    self._validate_one(root)
+                self.assertTrue(
+                    any(
+                        filename in issue and "coordinate artifact is missing" in issue
+                        for issue in caught.exception.issues
+                    ),
+                    caught.exception.issues,
+                )
+
+    def test_rejects_malformed_coordinate_artifacts(self) -> None:
+        cases = (
+            (HESSIAN_FOR_STEP_HISTORY_FILENAME, "dtype", "expected float64"),
+            (STEP_MULTIPLIER_HISTORY_FILENAME, "shape", "expected (3, 5123)"),
+            (
+                HESSIAN_FOR_STEP_HISTORY_FILENAME,
+                "nonfinite",
+                "contains non-finite values",
+            ),
+        )
+        for filename, mutation, expected_text in cases:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as root:
+                run_dir = SweepFixture.write_run(
+                    root,
+                    condition="diag_curvature",
+                    schedule="inverse_sqrt",
+                    alpha0=10.0,
+                    seed=0,
+                )
+                path = os.path.join(run_dir, filename)
+                values = np.load(path)
+                if mutation == "dtype":
+                    values = values.astype(np.float32)
+                elif mutation == "shape":
+                    values = values[:, :-1]
+                else:
+                    values[1, 10] = np.nan
+                np.save(path, values)
+                with self.assertRaises(HessianSweepValidationError) as caught:
+                    self._validate_one(root)
+                self.assertTrue(
+                    any(expected_text in issue for issue in caught.exception.issues),
+                    caught.exception.issues,
+                )
+
+    def test_rejects_any_saved_multiplier_coordinate_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            run_dir = SweepFixture.write_run(
+                root,
+                condition="diag_curvature",
+                schedule="inverse_sqrt",
+                alpha0=10.0,
+                seed=0,
+            )
+            path = os.path.join(run_dir, STEP_MULTIPLIER_HISTORY_FILENAME)
+            multipliers = np.load(path)
+            multipliers[2, 0] = np.nextafter(multipliers[2, 0], 1.0)
+            np.save(path, multipliers)
+            with self.assertRaises(HessianSweepValidationError) as caught:
+                self._validate_one(root)
+            self.assertTrue(
+                any(
+                    "differs from the exactly reconstructed applied multiplier"
+                    in issue
+                    for issue in caught.exception.issues
+                ),
+                caught.exception.issues,
+            )
+
+    def test_coordinate_artifacts_crosscheck_scalar_history_diagnostics(self) -> None:
+        mutations = (
+            ("h_step_max", -999.0),
+            ("curvature_active_count", 1999),
+            ("curvature_clip_count", 9),
+            ("curvature_clip_frac", 9.0 / EXPECTED_PARAMETER_COUNT),
+            ("curvature_preclip_max", 1049.0),
+            ("curvature_clip_excess_mean", 19.0),
+            ("raw_step_multiplier_min", 0.001),
+            ("multiplier_floor_clip_count", 9),
+            ("multiplier_floor_clip_frac", 9.0 / EXPECTED_PARAMETER_COUNT),
+            ("multiplier_floor_clip_deficit_mean", 0.01),
+            ("step_multiplier_min", 0.051),
+            ("step_multiplier_mean", 0.5),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as root:
+                run_dir = SweepFixture.write_run(
+                    root,
+                    condition="diag_curvature",
+                    schedule="inverse_sqrt",
+                    alpha0=10.0,
+                    seed=0,
+                )
+                path = os.path.join(run_dir, "history.json")
+                history = SweepFixture.read(path)
+                history[2][field] = value
+                SweepFixture.write(path, history)
+                with self.assertRaises(HessianSweepValidationError) as caught:
+                    self._validate_one(root)
+                self.assertTrue(
+                    any(
+                        f".{field}=" in issue
+                        and "reconstructed coordinate artifacts" in issue
+                        for issue in caught.exception.issues
+                    ),
+                    caught.exception.issues,
+                )
+
     def test_complete_matrix_produces_runs_groups_and_paired_differences(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             SweepFixture.write_matrix(root)
@@ -311,23 +541,27 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
             self.assertAlmostEqual(
                 diag_row["curvature_clip_active_iteration_fraction"], 1.0 / 3.0
             )
-            self.assertEqual(
+            self.assertAlmostEqual(
                 diag_row["mean_curvature_clip_excess_per_clipped_coordinate"],
                 20.0,
             )
-            self.assertEqual(diag_row["total_multiplier_floor_clip_count"], 15)
+            self.assertEqual(diag_row["total_multiplier_floor_clip_count"], 10)
             self.assertAlmostEqual(
-                diag_row["mean_multiplier_floor_clip_frac"], 15.0 / 5123.0 / 3.0
+                diag_row["mean_multiplier_floor_clip_frac"], 10.0 / 5123.0 / 3.0
             )
             self.assertAlmostEqual(
                 diag_row["multiplier_floor_clip_active_iteration_fraction"],
                 1.0 / 3.0,
             )
+            expected_floor_deficit = 0.05 - 1.0 / (
+                1.0
+                + learning_rate_at_iteration(10.0, 2, "inverse_sqrt") * 1000.0
+            )
             self.assertAlmostEqual(
                 diag_row[
                     "mean_multiplier_floor_clip_deficit_per_clipped_coordinate"
                 ],
-                0.03,
+                expected_floor_deficit,
             )
             self.assertEqual(diag_row["total_multiplier_ceiling_clip_count"], 0)
             self.assertEqual(
@@ -343,7 +577,7 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
             )
             self.assertEqual(diag_group["total_curvature_clip_count_mean"], 10.0)
             self.assertEqual(
-                diag_group["total_multiplier_floor_clip_count_mean"], 15.0
+                diag_group["total_multiplier_floor_clip_count_mean"], 10.0
             )
             paired = paired_diag_minus_standard(rows)
             self.assertEqual(paired["difference_direction"], "diag_curvature_minus_standard_es")
@@ -370,7 +604,7 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
                     cell["diag_curvature_mechanism"][
                         "total_multiplier_floor_clip_count"
                     ]["mean_across_runs"],
-                    15.0 if cell["initial_learning_rate"] == 10.0 else 17.0,
+                    10.0,
                 )
 
     def test_live_optimizer_serialization_allows_undefined_correlations(self) -> None:
@@ -398,6 +632,8 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
             params = np.zeros(5123, dtype=np.float64)
             optimizer.current_params = params.copy()
             history: list[dict[str, object]] = []
+            hessian_history: list[np.ndarray] = []
+            multiplier_history: list[np.ndarray] = []
             for iteration in range(3):
                 optimizer.learning_rate = learning_rate_at_iteration(
                     10.0, iteration, "inverse_sqrt"
@@ -409,6 +645,12 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
                     params, noise, fresh_fitness, ask_info
                 )
                 optimizer.current_params = params.copy()
+                hessian_for_step = optimizer.hessian_for_step_vector
+                step_multiplier = optimizer.step_multiplier_vector
+                self.assertIsNotNone(hessian_for_step)
+                self.assertIsNotNone(step_multiplier)
+                hessian_history.append(hessian_for_step)
+                multiplier_history.append(step_multiplier)
                 record = _history_record(
                     iteration,
                     float(iteration + 1),
@@ -428,6 +670,14 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
             self.assertNotIn("h_split_correlation", history[0])
             self.assertNotIn("h_temporal_correlation", history[1])
             SweepFixture.write(os.path.join(run_dir, "history.json"), history)
+            np.save(
+                os.path.join(run_dir, HESSIAN_FOR_STEP_HISTORY_FILENAME),
+                np.asarray(hessian_history, dtype=np.float64),
+            )
+            np.save(
+                os.path.join(run_dir, STEP_MULTIPLIER_HISTORY_FILENAME),
+                np.asarray(multiplier_history, dtype=np.float64),
+            )
 
             rows = self._validate_one(root)
             self.assertEqual(len(rows), 1)
@@ -470,39 +720,40 @@ class HopperHessianNoTrustSummaryTests(unittest.TestCase):
             )
             path = os.path.join(run_dir, "history.json")
             history = SweepFixture.read(path)
-            curvature_record = history[0]
-            curvature_record["curvature_preclip_max"] = 1000.0
-            curvature_record["curv_max"] = 1000.0
-            curvature_record["linear_max_abs_diagonal"] = 10001.0
-            curvature_record["linear_condition_estimate"] = 10001.0
-            curvature_record["raw_step_multiplier_min"] = 1.0 / 10001.0
-            curvature_record["step_multiplier_min"] = 0.05
-            curvature_record["multiplier_floor_clip_count"] = 1
-            curvature_record["multiplier_floor_clip_frac"] = 1.0 / 5123.0
-            curvature_record["multiplier_floor_clip_active"] = True
-            curvature_record["multiplier_floor_clip_deficit_mean"] = (
-                0.05 - 1.0 / 10001.0
+            hessian_path = os.path.join(
+                run_dir, HESSIAN_FOR_STEP_HISTORY_FILENAME
             )
-            curvature_record["multiplier_floor_clip_deficit_max"] = (
-                0.05 - 1.0 / 10001.0
+            multiplier_path = os.path.join(
+                run_dir, STEP_MULTIPLIER_HISTORY_FILENAME
             )
-            curvature_record["multiplier_floor_frac"] = 1.0 / 5123.0
-
-            multiplier_record = history[1]
-            floor_boundary_curvature = 19.0 / float(multiplier_record["lr"])
-            multiplier_record["curvature_preclip_max"] = floor_boundary_curvature
-            multiplier_record["curv_max"] = floor_boundary_curvature
-            multiplier_record["linear_max_abs_diagonal"] = 20.0
-            multiplier_record["linear_condition_estimate"] = 20.0
-            multiplier_record["raw_step_multiplier_min"] = 0.05
-            multiplier_record["step_multiplier_min"] = 0.05
-            multiplier_record["multiplier_floor_frac"] = 1.0 / 5123.0
+            hessian_history = np.load(hessian_path)
+            multiplier_history = np.load(multiplier_path)
+            hessian_history[0, 0] = -1000.0
+            floor_boundary_curvature = 19.0 / float(history[1]["lr"])
+            hessian_history[1, 0] = -floor_boundary_curvature
+            for iteration in (0, 1):
+                lr = float(history[iteration]["lr"])
+                history[iteration].update(
+                    SweepFixture.coordinate_diagnostics(
+                        hessian_history[iteration], lr
+                    )
+                )
+                curvature = np.clip(
+                    np.maximum(-hessian_history[iteration], 0.0),
+                    0.0,
+                    1000.0,
+                )
+                multiplier_history[iteration] = np.clip(
+                    1.0 / (1.0 + lr * curvature), 0.05, 1.0
+                )
             SweepFixture.write(path, history)
+            np.save(hessian_path, hessian_history)
+            np.save(multiplier_path, multiplier_history)
 
             rows = self._validate_one(root)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["total_curvature_clip_count"], 10)
-            self.assertEqual(rows[0]["total_multiplier_floor_clip_count"], 16)
+            self.assertEqual(rows[0]["total_multiplier_floor_clip_count"], 11)
 
     def test_rejects_inconsistent_exact_clipping_diagnostics(self) -> None:
         mutations = (

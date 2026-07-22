@@ -10,6 +10,10 @@ This repository contains the reference implementation for the DIIWES paper exper
   - `policies.py`: NumPy MLP policies and layer-slice helpers.
 - `utilities/`: shared utilities such as observation normalization.
 - `experiments/`: runnable training entry points.
+  - `nonlinear_cartpole/`: policy-gradient warm-start benchmark on nonlinear
+    CartPole dynamics, followed by matched Standard ES and DIIWES fine-tuning.
+  - `curvature_sample_size/`: controlled linear and nonlinear validation of
+    diagonal curvature-estimation error versus antithetic sample size.
 - `configs/`: experiment configuration files, split into `configs/mujuco/` and `configs/atari/`.
 - `plots/`: paper figures and generated table fragments.
 
@@ -157,3 +161,36 @@ python experiments/train.py \
   --workers 8 \
   --output results/pong_diag_curvature_seed0
 ```
+
+## Nonlinear policy-gradient initialization benchmark
+
+The low-cost nonlinear benchmark adapts the PPO-initialization idea from
+[Wang, Zhang, and Ying (2026)](https://arxiv.org/abs/2604.17747) without its
+human-feedback or federated layers.
+It compares random initialization with a REINFORCE/Adam first stage, then runs
+the checked-out Standard ES and diagonal-curvature DIIWES implementations from
+the same matched initial policies. The locked nonlinear protocol uses 300 ES
+updates and 250 antithetic perturbation pairs (500 candidate policies) per
+update:
+
+```bash
+python -m experiments.nonlinear_cartpole.benchmark
+```
+
+See `experiments/nonlinear_cartpole/README.md` for the protocol and smoke-run
+options. The default report is written to
+`reports/nonlinear_cartpole_warm_start/`.
+
+## Curvature sample-size validation
+
+The isolated curvature study calls the current DIIWES estimator directly and
+compares it with analytic Gaussian-smoothed Hessian targets on nonlinear and
+linear functions:
+
+```bash
+python -m experiments.curvature_sample_size.benchmark
+```
+
+Raw repetitions, aggregate error curves, validation checks, and the report
+payload are kept separately in `reports/curvature_sample_size/`. See
+`experiments/curvature_sample_size/README.md` for the protocol.

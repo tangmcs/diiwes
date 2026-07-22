@@ -40,6 +40,8 @@ EXPECTED_ITERATIONS = 500
 EXPECTED_ENV = "Hopper-v5"
 EXPECTED_POPULATION_SIZE = 500
 EXPECTED_PARAMETER_COUNT = 5123
+HESSIAN_FOR_STEP_HISTORY_FILENAME = "hessian_for_step_history.npy"
+STEP_MULTIPLIER_HISTORY_FILENAME = "step_multiplier_history.npy"
 
 # Values inherited from configs/mujuco/hopper.yaml on main, with the requested
 # population increase and fresh-only replay overrides. Keeping these locked
@@ -705,7 +707,15 @@ def _validate_diag_record(
         and curvature_excess_max is not None
         and (
             curvature_excess_mean < 0.0
-            or curvature_excess_max < curvature_excess_mean
+            or (
+                curvature_excess_max < curvature_excess_mean
+                and not np.isclose(
+                    curvature_excess_max,
+                    curvature_excess_mean,
+                    rtol=1e-12,
+                    atol=1e-12,
+                )
+            )
         )
     ):
         issues.append(f"{context}: curvature clip excess statistics are invalid")
@@ -880,7 +890,18 @@ def _validate_diag_record(
     if (
         floor_deficit_mean is not None
         and floor_deficit_max is not None
-        and (floor_deficit_mean < 0.0 or floor_deficit_max < floor_deficit_mean)
+        and (
+            floor_deficit_mean < 0.0
+            or (
+                floor_deficit_max < floor_deficit_mean
+                and not np.isclose(
+                    floor_deficit_max,
+                    floor_deficit_mean,
+                    rtol=1e-12,
+                    atol=1e-12,
+                )
+            )
+        )
     ):
         issues.append(f"{context}: multiplier floor deficit statistics are invalid")
     if (
@@ -970,6 +991,228 @@ def _validate_diag_record(
             issues.append(
                 f"{context}.raw_step_multiplier_max disagrees with linear diagonal"
             )
+
+
+def _load_coordinate_history(
+    path: str,
+    *,
+    label: str,
+    expected_iterations: int,
+    issues: list[str],
+) -> np.ndarray | None:
+    """Load one required full-coordinate diagnostic matrix without copying it."""
+
+    if not os.path.isfile(path):
+        issues.append(f"{path}: required diagonal coordinate artifact is missing")
+        return None
+    try:
+        values = np.load(path, allow_pickle=False, mmap_mode="r")
+    except (OSError, ValueError, EOFError) as error:
+        issues.append(f"{path}: unreadable {label} coordinate artifact: {error}")
+        return None
+    if not isinstance(values, np.ndarray):
+        issues.append(f"{path}: {label} coordinate artifact is not a NumPy array")
+        return None
+    if values.dtype != np.dtype(np.float64):
+        issues.append(
+            f"{path}: {label} coordinate artifact has dtype {values.dtype}, "
+            "expected float64"
+        )
+        return None
+    expected_shape = (expected_iterations, EXPECTED_PARAMETER_COUNT)
+    if values.shape != expected_shape:
+        issues.append(
+            f"{path}: {label} coordinate artifact has shape {values.shape}, "
+            f"expected {expected_shape}"
+        )
+        return None
+    if not bool(np.all(np.isfinite(values))):
+        issues.append(f"{path}: {label} coordinate artifact contains non-finite values")
+        return None
+    return values
+
+
+def _check_coordinate_statistic(
+    record: dict[str, Any],
+    field: str,
+    expected: bool | int | float,
+    context: str,
+    issues: list[str],
+) -> None:
+    """Cross-check one scalar history field against the coordinate artifacts."""
+
+    if field not in record:
+        issues.append(
+            f"{context} is missing coordinate-crosschecked field {field}"
+        )
+        return
+    actual = record[field]
+    if isinstance(expected, bool):
+        matches = isinstance(actual, bool) and actual is expected
+    elif isinstance(expected, int):
+        numeric = _finite_float(actual)
+        matches = numeric is not None and numeric == expected
+    else:
+        numeric = _finite_float(actual)
+        matches = numeric is not None and bool(
+            np.isclose(numeric, expected, rtol=1e-12, atol=1e-12)
+        )
+    if not matches:
+        issues.append(
+            f"{context}.{field}={actual!r} disagrees with reconstructed "
+            f"coordinate artifacts ({expected!r})"
+        )
+
+
+def _diag_coordinate_artifact_issues(
+    history: Any,
+    *,
+    run_dir: str,
+    expected_iterations: int,
+) -> list[str]:
+    """Validate full Hessian/multiplier histories and their scalar projections."""
+
+    issues: list[str] = []
+    hessian_path = os.path.join(run_dir, HESSIAN_FOR_STEP_HISTORY_FILENAME)
+    multiplier_path = os.path.join(run_dir, STEP_MULTIPLIER_HISTORY_FILENAME)
+    hessian_history = _load_coordinate_history(
+        hessian_path,
+        label="Hessian-for-step",
+        expected_iterations=expected_iterations,
+        issues=issues,
+    )
+    multiplier_history = _load_coordinate_history(
+        multiplier_path,
+        label="step-multiplier",
+        expected_iterations=expected_iterations,
+        issues=issues,
+    )
+    if hessian_history is None or multiplier_history is None:
+        return issues
+    if (
+        not isinstance(history, list)
+        or len(history) != expected_iterations
+        or any(not isinstance(record, dict) for record in history)
+    ):
+        return issues
+
+    coordinate_count = EXPECTED_PARAMETER_COUNT
+    curvature_cap = float(EXPECTED_DIAG_CONFIG["curvature_clip"])
+    multiplier_floor = float(EXPECTED_DIAG_CONFIG["min_step_multiplier"])
+    for index, record in enumerate(history):
+        context = f"{run_dir}: history[{index}]"
+        learning_rate = _finite_float(record.get("lr"))
+        if learning_rate is None:
+            continue
+
+        hessian_for_step = np.asarray(hessian_history[index])
+        saved_multiplier = np.asarray(multiplier_history[index])
+        curvature_preclip = np.maximum(-hessian_for_step, 0.0)
+        curvature_active_mask = curvature_preclip > 0.0
+        curvature_clip_mask = curvature_preclip > curvature_cap
+        curvature = np.clip(curvature_preclip, 0.0, curvature_cap)
+        linear_diagonal = 1.0 + learning_rate * curvature
+        raw_multiplier = 1.0 / linear_diagonal
+        applied_multiplier = np.clip(raw_multiplier, multiplier_floor, 1.0)
+
+        if not np.allclose(
+            saved_multiplier,
+            applied_multiplier,
+            rtol=0.0,
+            atol=0.0,
+        ):
+            mismatch_count = int(np.count_nonzero(saved_multiplier != applied_multiplier))
+            issues.append(
+                f"{multiplier_path}: iteration {index} differs from the exactly "
+                f"reconstructed applied multiplier at {mismatch_count} coordinate(s)"
+            )
+
+        curvature_active_count = int(np.count_nonzero(curvature_active_mask))
+        curvature_clip_count = int(np.count_nonzero(curvature_clip_mask))
+        if curvature_clip_count:
+            curvature_excess = (
+                curvature_preclip[curvature_clip_mask] - curvature_cap
+            )
+            curvature_excess_mean = float(np.mean(curvature_excess))
+            curvature_excess_max = float(np.max(curvature_excess))
+        else:
+            curvature_excess_mean = 0.0
+            curvature_excess_max = 0.0
+
+        floor_clip_mask = raw_multiplier < multiplier_floor
+        floor_clip_count = int(np.count_nonzero(floor_clip_mask))
+        if floor_clip_count:
+            floor_deficit = multiplier_floor - raw_multiplier[floor_clip_mask]
+            floor_deficit_mean = float(np.mean(floor_deficit))
+            floor_deficit_max = float(np.max(floor_deficit))
+        else:
+            floor_deficit_mean = 0.0
+            floor_deficit_max = 0.0
+
+        ceiling_clip_mask = raw_multiplier > 1.0
+        ceiling_clip_count = int(np.count_nonzero(ceiling_clip_mask))
+        if ceiling_clip_count:
+            ceiling_excess = raw_multiplier[ceiling_clip_mask] - 1.0
+            ceiling_excess_mean = float(np.mean(ceiling_excess))
+            ceiling_excess_max = float(np.max(ceiling_excess))
+        else:
+            ceiling_excess_mean = 0.0
+            ceiling_excess_max = 0.0
+
+        reconstructed: dict[str, bool | int | float] = {
+            "h_step_mean": float(np.mean(hessian_for_step)),
+            "h_step_min": float(np.min(hessian_for_step)),
+            "h_step_max": float(np.max(hessian_for_step)),
+            "curvature_coordinate_count": coordinate_count,
+            "curvature_active_count": curvature_active_count,
+            "curvature_active_frac": curvature_active_count / coordinate_count,
+            "curvature_preclip_mean": float(np.mean(curvature_preclip)),
+            "curvature_preclip_max": float(np.max(curvature_preclip)),
+            "curvature_clip_count": curvature_clip_count,
+            "curvature_clip_frac": curvature_clip_count / coordinate_count,
+            "curvature_clip_active": curvature_clip_count > 0,
+            "curvature_clip_excess_mean": curvature_excess_mean,
+            "curvature_clip_excess_max": curvature_excess_max,
+            "curv_mean": float(np.mean(curvature)),
+            "curv_min": float(np.min(curvature)),
+            "curv_max": float(np.max(curvature)),
+            "multiplier_coordinate_count": coordinate_count,
+            "raw_step_multiplier_min": float(np.min(raw_multiplier)),
+            "raw_step_multiplier_max": float(np.max(raw_multiplier)),
+            "multiplier_floor_clip_count": floor_clip_count,
+            "multiplier_floor_clip_frac": floor_clip_count / coordinate_count,
+            "multiplier_floor_clip_active": floor_clip_count > 0,
+            "multiplier_floor_clip_deficit_mean": floor_deficit_mean,
+            "multiplier_floor_clip_deficit_max": floor_deficit_max,
+            "multiplier_ceiling_clip_count": ceiling_clip_count,
+            "multiplier_ceiling_clip_frac": ceiling_clip_count / coordinate_count,
+            "multiplier_ceiling_clip_active": ceiling_clip_count > 0,
+            "multiplier_ceiling_clip_excess_mean": ceiling_excess_mean,
+            "multiplier_ceiling_clip_excess_max": ceiling_excess_max,
+            "step_multiplier_min": float(np.min(applied_multiplier)),
+            "step_multiplier_max": float(np.max(applied_multiplier)),
+            "step_multiplier_mean": float(np.mean(applied_multiplier)),
+            "step_multiplier_std": float(np.std(applied_multiplier)),
+            "step_multiplier_cv": float(
+                np.std(applied_multiplier) / (np.mean(applied_multiplier) + 1e-12)
+            ),
+            "hessian_shrinkage_median": float(np.median(applied_multiplier)),
+            "hessian_shrinkage_p90": float(
+                np.percentile(applied_multiplier, 90.0)
+            ),
+            "hessian_shrinkage_max": float(np.max(applied_multiplier)),
+            "multiplier_floor_frac": float(
+                np.mean(applied_multiplier <= multiplier_floor + 1e-12)
+            ),
+            "linear_min_abs_diagonal": float(np.min(linear_diagonal)),
+            "linear_max_abs_diagonal": float(np.max(linear_diagonal)),
+            "linear_condition_estimate": float(
+                np.max(linear_diagonal) / np.min(linear_diagonal)
+            ),
+        }
+        for field, expected in reconstructed.items():
+            _check_coordinate_statistic(record, field, expected, context, issues)
+    return issues
 
 
 def _history_issues(
@@ -1528,7 +1771,19 @@ def validate_and_collect(
             expected_iterations=expected_iterations,
         )
         issues.extend(history_problems)
-        if not config_problems and not history_problems:
+        coordinate_artifact_problems: list[str] = []
+        if condition == "diag_curvature":
+            coordinate_artifact_problems = _diag_coordinate_artifact_issues(
+                history,
+                run_dir=run_dir,
+                expected_iterations=expected_iterations,
+            )
+            issues.extend(coordinate_artifact_problems)
+        if (
+            not config_problems
+            and not history_problems
+            and not coordinate_artifact_problems
+        ):
             rows[run_dir] = _row_from_run(
                 config,
                 history,

@@ -5,8 +5,15 @@ Problem_to_fix/
 plots/
 scripts/summarize.py
 scripts/analyze_mujoco_results.py
+# One-off local artifact relocation helpers.
+scripts/archive_hopper_pginit_to_presentation.py
+scripts/archive_hopper_pginit_to_presentation.sh
 job_outputs/
 results/
+/job_outputs
+/results
+/presentation/
+/reports/
 figures/
 analysis/
 slurm/

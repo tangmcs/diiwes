@@ -456,6 +456,114 @@ def make_optimizer(
     )
 
 
+def _file_sha256(path: str | os.PathLike[str]) -> str:
+    """Return the SHA-256 digest of one initialization artifact."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _load_initial_state(
+    config: dict[str, Any],
+    policy: MLPPolicy | DiscretePolicy,
+    obs_normalizer: ObsNormalizer | None,
+    seed: int,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Load a matched policy-gradient checkpoint or use legacy random init."""
+    params_path = config.get("initial_params_path")
+    obs_path = config.get("initial_obs_norm_path")
+    metadata: dict[str, Any] = {}
+    if params_path is None:
+        if obs_path is not None:
+            raise ValueError("initial_obs_norm_path requires initial_params_path")
+        params = np.random.randn(policy.num_params) * float(
+            config.get("init_param_std", 0.1)
+        )
+        metadata["parameter_initialization"] = "seeded_gaussian"
+        metadata["initialization_seed"] = int(seed)
+        return params.astype(np.float64, copy=False), metadata
+
+    params_file = Path(params_path).resolve()
+    if not params_file.is_file():
+        raise FileNotFoundError(params_file)
+    params = np.load(params_file, allow_pickle=False)
+    params = np.asarray(params, dtype=np.float64)
+    expected_shape = (int(policy.num_params),)
+    if params.shape != expected_shape:
+        raise ValueError(
+            f"initial parameter checkpoint has shape {params.shape}, expected {expected_shape}"
+        )
+    if not np.all(np.isfinite(params)):
+        raise FloatingPointError("initial parameter checkpoint contains non-finite values")
+    params_digest = _file_sha256(params_file)
+    expected_params_digest = config.get("expected_initial_params_sha256")
+    if expected_params_digest and params_digest != expected_params_digest:
+        raise RuntimeError(
+            "initial parameter digest mismatch: "
+            f"expected {expected_params_digest}, found {params_digest}"
+        )
+    metadata.update(
+        {
+            "parameter_initialization": "policy_gradient_checkpoint",
+            "initial_params_path": str(params_file),
+            "initial_params_sha256": params_digest,
+        }
+    )
+
+    if obs_path is None:
+        if obs_normalizer is not None:
+            raise ValueError(
+                "a policy-gradient checkpoint with use_obs_norm=true requires "
+                "initial_obs_norm_path"
+            )
+        return params.copy(), metadata
+    if obs_normalizer is None:
+        raise ValueError("initial_obs_norm_path requires use_obs_norm=true")
+
+    obs_file = Path(obs_path).resolve()
+    if not obs_file.is_file():
+        raise FileNotFoundError(obs_file)
+    with np.load(obs_file, allow_pickle=False) as state:
+        required = {"mean", "var", "count"}
+        missing = required.difference(state.files)
+        if missing:
+            raise ValueError(
+                f"initial observation normalizer is missing {sorted(missing)}"
+            )
+        mean = np.asarray(state["mean"], dtype=np.float64)
+        var = np.asarray(state["var"], dtype=np.float64)
+        count = float(np.asarray(state["count"]).item())
+    if mean.shape != obs_normalizer.shape or var.shape != obs_normalizer.shape:
+        raise ValueError(
+            "initial observation normalizer shape mismatch: "
+            f"mean={mean.shape}, var={var.shape}, expected={obs_normalizer.shape}"
+        )
+    if not np.all(np.isfinite(mean)) or not np.all(np.isfinite(var)):
+        raise FloatingPointError("initial observation normalizer is non-finite")
+    if np.any(var < 0.0) or not np.isfinite(count) or count <= 0.0:
+        raise ValueError("initial observation variance/count must be valid")
+    obs_normalizer.mean = mean.copy()
+    obs_normalizer.var = var.copy()
+    obs_normalizer.count = count
+    obs_digest = _file_sha256(obs_file)
+    expected_obs_digest = config.get("expected_initial_obs_norm_sha256")
+    if expected_obs_digest and obs_digest != expected_obs_digest:
+        raise RuntimeError(
+            "initial observation-normalizer digest mismatch: "
+            f"expected {expected_obs_digest}, found {obs_digest}"
+        )
+    metadata.update(
+        {
+            "initial_obs_norm_path": str(obs_file),
+            "initial_obs_norm_sha256": obs_digest,
+            "initial_obs_norm_count": count,
+        }
+    )
+    return params.copy(), metadata
+
+
 def _json_scalar(value: Any) -> Any:
     if isinstance(value, (np.floating, np.integer)):
         return value.item()
@@ -545,6 +653,94 @@ def _format_progress(record: dict[str, Any], verbose: bool) -> str:
     )
 
 
+def _validated_coordinate_vector(
+    optimizer: Any, attribute: str, num_params: int
+) -> np.ndarray:
+    """Return one exact finite float64 optimizer vector or fail the run."""
+    value = getattr(optimizer, attribute, None)
+    if value is None:
+        raise RuntimeError(f"optimizer did not expose {attribute} after tell()")
+    array = np.asarray(value)
+    expected_shape = (int(num_params),)
+    if array.shape != expected_shape:
+        raise ValueError(
+            f"optimizer {attribute} has shape {array.shape}, expected {expected_shape}"
+        )
+    if array.dtype != np.dtype(np.float64):
+        raise TypeError(
+            f"optimizer {attribute} has dtype {array.dtype}, expected float64"
+        )
+    if not np.all(np.isfinite(array)):
+        raise FloatingPointError(f"optimizer {attribute} contains non-finite values")
+    return array
+
+
+def _write_coordinate_history_row(
+    optimizer: Any,
+    hessian_history: np.memmap,
+    multiplier_history: np.memmap,
+    iteration: int,
+    num_params: int,
+) -> None:
+    """Persist and flush the exact vectors for one completed optimizer step."""
+    expected_history_shape = (hessian_history.shape[0], int(num_params))
+    if hessian_history.shape != expected_history_shape:
+        raise ValueError(
+            "hessian history has shape "
+            f"{hessian_history.shape}, expected {expected_history_shape}"
+        )
+    if multiplier_history.shape != expected_history_shape:
+        raise ValueError(
+            "multiplier history has shape "
+            f"{multiplier_history.shape}, expected {expected_history_shape}"
+        )
+    if hessian_history.dtype != np.dtype(np.float64):
+        raise TypeError("hessian history must have dtype float64")
+    if multiplier_history.dtype != np.dtype(np.float64):
+        raise TypeError("multiplier history must have dtype float64")
+    row = int(iteration)
+    if row < 0 or row >= hessian_history.shape[0]:
+        raise IndexError(
+            f"coordinate history row {row} is outside 0..{hessian_history.shape[0] - 1}"
+        )
+
+    hessian = _validated_coordinate_vector(
+        optimizer, "hessian_for_step_vector", num_params
+    )
+    multiplier = _validated_coordinate_vector(
+        optimizer, "step_multiplier_vector", num_params
+    )
+    hessian_history[row, :] = hessian
+    multiplier_history[row, :] = multiplier
+    hessian_history.flush()
+    multiplier_history.flush()
+
+
+def _flush_close_memmap(value: np.memmap | None) -> None:
+    """Flush and deterministically close a NumPy memmap when one was opened."""
+    if value is None:
+        return
+    try:
+        value.flush()
+    finally:
+        mapping = getattr(value, "_mmap", None)
+        if mapping is not None and not mapping.closed:
+            mapping.close()
+
+
+def _should_record_coordinate_history(
+    config: dict[str, Any], optimizer: StandardES | DIIWES
+) -> bool:
+    """Limit full-coordinate artifacts to the locked diagonal dampen arm."""
+    return bool(
+        config.get("condition") == "diag_curvature"
+        and isinstance(optimizer, DIIWES)
+        and optimizer.use_curvature
+        and optimizer.curvature_mode == "diag"
+        and optimizer.curvature_step_mode == "dampen"
+    )
+
+
 def train(
     config: dict[str, Any],
     seed: int,
@@ -580,7 +776,10 @@ def train(
     trust_radius = getattr(optimizer, "trust_radius", None)
 
     obs_normalizer = ObsNormalizer(env.observation_space.shape) if config.get("use_obs_norm", False) else None
-    params = np.random.randn(policy.num_params) * float(config.get("init_param_std", 0.1))
+    params, initialization_metadata = _load_initial_state(
+        config, policy, obs_normalizer, seed
+    )
+    config.update(initialization_metadata)
     optimizer.current_params = params.copy()
 
     n_iterations = int(config.get("n_iterations", 500))
@@ -617,11 +816,12 @@ def train(
     # completed-run artifact; the append-only JSONL file is the live audit log.
     with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump({**config, "seed": int(seed)}, f, indent=2)
-    history_jsonl = open(
-        os.path.join(output_dir, "history.jsonl"), "w", encoding="utf-8"
-    )
+    record_coordinate_history = _should_record_coordinate_history(config, optimizer)
 
-    pool = Pool(processes=n_workers, initializer=_init_worker, initargs=(config,))
+    history_jsonl = None
+    hessian_history: np.memmap | None = None
+    multiplier_history: np.memmap | None = None
+    pool = None
     history: list[dict[str, Any]] = []
     best_reward = -np.inf
     best_fitness_so_far = -np.inf
@@ -631,6 +831,24 @@ def train(
     eval_env_steps = 0
 
     try:
+        history_jsonl = open(
+            os.path.join(output_dir, "history.jsonl"), "w", encoding="utf-8"
+        )
+        if record_coordinate_history:
+            coordinate_shape = (n_iterations, policy.num_params)
+            hessian_history = np.lib.format.open_memmap(
+                os.path.join(output_dir, "hessian_for_step_history.npy"),
+                mode="w+",
+                dtype=np.float64,
+                shape=coordinate_shape,
+            )
+            multiplier_history = np.lib.format.open_memmap(
+                os.path.join(output_dir, "step_multiplier_history.npy"),
+                mode="w+",
+                dtype=np.float64,
+                shape=coordinate_shape,
+            )
+        pool = Pool(processes=n_workers, initializer=_init_worker, initargs=(config,))
         for iteration in range(n_iterations):
             start = time.time()
             optimizer.learning_rate = learning_rate_at_iteration(
@@ -724,6 +942,16 @@ def train(
                 eval_env_steps,
                 eval_env_steps_iter,
             )
+            if record_coordinate_history:
+                if hessian_history is None or multiplier_history is None:
+                    raise RuntimeError("coordinate history memmaps were not initialized")
+                _write_coordinate_history_row(
+                    optimizer,
+                    hessian_history,
+                    multiplier_history,
+                    iteration,
+                    policy.num_params,
+                )
             history.append(record)
             history_jsonl.write(json.dumps(record, separators=(",", ":")) + "\n")
             history_jsonl.flush()
@@ -731,10 +959,22 @@ def train(
             if iteration % log_interval == 0 or iteration == n_iterations - 1:
                 print(_format_progress(record, verbose), flush=True)
     finally:
-        history_jsonl.close()
-        pool.close()
-        pool.join()
-        env.close()
+        try:
+            _flush_close_memmap(hessian_history)
+        finally:
+            try:
+                _flush_close_memmap(multiplier_history)
+            finally:
+                try:
+                    if history_jsonl is not None:
+                        history_jsonl.close()
+                finally:
+                    try:
+                        if pool is not None:
+                            pool.close()
+                            pool.join()
+                    finally:
+                        env.close()
 
     np.save(os.path.join(output_dir, "best_params.npy"), best_params)
     np.save(os.path.join(output_dir, "final_params.npy"), params)
@@ -829,6 +1069,18 @@ def main() -> None:
         help="Override whether ES uses rank-shaped fitness for the policy gradient.",
     )
     parser.add_argument("--iterations", type=int, default=None)
+    parser.add_argument(
+        "--initial-params",
+        default=None,
+        help="Policy-gradient parameter checkpoint used as the shared ES center.",
+    )
+    parser.add_argument(
+        "--initial-obs-norm",
+        default=None,
+        help="Observation-normalization state paired with --initial-params.",
+    )
+    parser.add_argument("--initial-params-sha256", default=None)
+    parser.add_argument("--initial-obs-norm-sha256", default=None)
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--verbose", action="store_true", help="Print detailed optimizer diagnostics while training.")
     parser.add_argument("--output", required=True)
@@ -874,6 +1126,14 @@ def main() -> None:
         config["rank_fitness"] = args.rank_fitness == "true"
     if args.iterations is not None:
         config["n_iterations"] = int(args.iterations)
+    if args.initial_params is not None:
+        config["initial_params_path"] = str(Path(args.initial_params).resolve())
+    if args.initial_obs_norm is not None:
+        config["initial_obs_norm_path"] = str(Path(args.initial_obs_norm).resolve())
+    if args.initial_params_sha256 is not None:
+        config["expected_initial_params_sha256"] = args.initial_params_sha256
+    if args.initial_obs_norm_sha256 is not None:
+        config["expected_initial_obs_norm_sha256"] = args.initial_obs_norm_sha256
 
     config.setdefault("lr_schedule", "exponential")
     config["initial_learning_rate"] = float(config.get("learning_rate", 0.02))

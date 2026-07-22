@@ -157,6 +157,26 @@ class DIIWES(StandardES):
         self._last_h_split_relative_disagreement: float | None = None
         self._last_h_temporal_correlation: float | None = None
         self._last_h_temporal_sign_agreement: float | None = None
+        self._last_hessian_for_step_vector: np.ndarray | None = None
+        self._last_step_multiplier_vector: np.ndarray | None = None
+
+    @property
+    def hessian_for_step_vector(self) -> np.ndarray | None:
+        """Return a read-only copy of the signed Hessian used by the last step."""
+        if self._last_hessian_for_step_vector is None:
+            return None
+        value = self._last_hessian_for_step_vector.copy()
+        value.setflags(write=False)
+        return value
+
+    @property
+    def step_multiplier_vector(self) -> np.ndarray | None:
+        """Return a read-only copy of the final multiplier used by the last step."""
+        if self._last_step_multiplier_vector is None:
+            return None
+        value = self._last_step_multiplier_vector.copy()
+        value.setflags(write=False)
+        return value
 
     def _normalize_block_slices(
         self,
@@ -760,6 +780,14 @@ class DIIWES(StandardES):
         self.iteration += 1
         self.eval_count += n_fresh
         self.current_params = theta.copy()
+        # Keep exact coordinate histories out of the scalar info/JSON path.
+        # Defensive properties expose read-only copies to the trainer.
+        self._last_hessian_for_step_vector = np.asarray(
+            hessian_for_step, dtype=np.float64
+        ).copy()
+        self._last_step_multiplier_vector = np.asarray(
+            multiplier, dtype=np.float64
+        ).copy()
 
         w_max = float(np.max(weights))
         w_min = float(np.min(weights))

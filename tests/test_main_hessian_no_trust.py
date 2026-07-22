@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 
 import numpy as np
 
 from core.diiwes import DIIWES
-from experiments.train import learning_rate_at_iteration
+from experiments.train import (
+    _flush_close_memmap,
+    _should_record_coordinate_history,
+    _validated_coordinate_vector,
+    _write_coordinate_history_row,
+    learning_rate_at_iteration,
+)
 
 
 class LearningRateScheduleTests(unittest.TestCase):
@@ -193,6 +201,128 @@ class MainHessianDiagnosticsTests(unittest.TestCase):
         self.assertEqual(info["multiplier_ceiling_clip_excess_max"], 1.0)
         self.assertEqual(info["step_multiplier_min"], 1.0)
         self.assertEqual(info["step_multiplier_max"], 1.0)
+
+    def test_exact_coordinate_vectors_are_read_only_and_stay_out_of_info(self) -> None:
+        optimizer = DIIWES(
+            num_params=2,
+            population_size=4,
+            learning_rate=10.0,
+            noise_std=1.0,
+            buffer_size=0,
+            reuse_fraction=0.0,
+            implicit_damping=0.0,
+            rank_fitness=False,
+            use_curvature=True,
+            curvature_beta=0.5,
+            min_step_multiplier=0.05,
+            trust_radius=None,
+            bias_correct_curvature_ema=True,
+            seed=0,
+        )
+        self.assertIsNone(optimizer.hessian_for_step_vector)
+        self.assertIsNone(optimizer.step_multiplier_vector)
+        optimizer.hessian_ema[:] = np.asarray([-0.5, 1.0])
+        optimizer.hessian_ema_count = 1
+        params, noise, fitness, ask_info = self._batch()
+
+        _, info = optimizer.tell(params, noise, fitness, ask_info)
+
+        expected_hessian = np.asarray([-1.0, 2.0])
+        expected_multiplier = np.asarray([1.0 / 11.0, 1.0])
+        hessian = optimizer.hessian_for_step_vector
+        multiplier = optimizer.step_multiplier_vector
+        np.testing.assert_array_equal(hessian, expected_hessian)
+        np.testing.assert_array_equal(multiplier, expected_multiplier)
+        self.assertFalse(hessian.flags.writeable)
+        self.assertFalse(multiplier.flags.writeable)
+        with self.assertRaises(ValueError):
+            hessian[0] = 0.0
+        np.testing.assert_array_equal(
+            optimizer.hessian_for_step_vector, expected_hessian
+        )
+        self.assertNotIn("hessian_for_step_vector", info)
+        self.assertNotIn("step_multiplier_vector", info)
+
+    def test_coordinate_history_writer_flushes_exact_float64_rows(self) -> None:
+        optimizer = self._optimizer(trust_radius=None, use_curvature=True)
+        optimizer.hessian_ema[:] = np.asarray([-1.0, -2.0])
+        optimizer.hessian_ema_count = 1
+        params, noise, fitness, ask_info = self._batch()
+        optimizer.tell(params, noise, fitness, ask_info)
+        expected_hessian = optimizer.hessian_for_step_vector
+        expected_multiplier = optimizer.step_multiplier_vector
+
+        with tempfile.TemporaryDirectory() as root:
+            hessian_path = os.path.join(root, "hessian_for_step_history.npy")
+            multiplier_path = os.path.join(root, "step_multiplier_history.npy")
+            hessian_history = np.lib.format.open_memmap(
+                hessian_path, mode="w+", dtype=np.float64, shape=(2, 2)
+            )
+            multiplier_history = np.lib.format.open_memmap(
+                multiplier_path, mode="w+", dtype=np.float64, shape=(2, 2)
+            )
+            try:
+                _write_coordinate_history_row(
+                    optimizer,
+                    hessian_history,
+                    multiplier_history,
+                    iteration=0,
+                    num_params=2,
+                )
+            finally:
+                _flush_close_memmap(hessian_history)
+                _flush_close_memmap(multiplier_history)
+
+            stored_hessian = np.load(hessian_path)
+            stored_multiplier = np.load(multiplier_path)
+            self.assertEqual(stored_hessian.dtype, np.dtype(np.float64))
+            self.assertEqual(stored_multiplier.dtype, np.dtype(np.float64))
+            self.assertEqual(stored_hessian.shape, (2, 2))
+            self.assertEqual(stored_multiplier.shape, (2, 2))
+            np.testing.assert_array_equal(stored_hessian[0], expected_hessian)
+            np.testing.assert_array_equal(stored_multiplier[0], expected_multiplier)
+
+    def test_coordinate_vector_validation_refuses_shape_dtype_and_nonfinite(self) -> None:
+        class FakeOptimizer:
+            hessian_for_step_vector = np.ones(3, dtype=np.float64)
+
+        fake = FakeOptimizer()
+        with self.assertRaisesRegex(ValueError, "shape"):
+            _validated_coordinate_vector(fake, "hessian_for_step_vector", 2)
+        fake.hessian_for_step_vector = np.ones(2, dtype=np.float32)
+        with self.assertRaisesRegex(TypeError, "float64"):
+            _validated_coordinate_vector(fake, "hessian_for_step_vector", 2)
+        fake.hessian_for_step_vector = np.asarray([1.0, np.nan])
+        with self.assertRaisesRegex(FloatingPointError, "non-finite"):
+            _validated_coordinate_vector(fake, "hessian_for_step_vector", 2)
+        fake.hessian_for_step_vector = None
+        with self.assertRaisesRegex(RuntimeError, "did not expose"):
+            _validated_coordinate_vector(fake, "hessian_for_step_vector", 2)
+
+    def test_coordinate_history_is_limited_to_diag_dampen_condition(self) -> None:
+        optimizer = self._optimizer(trust_radius=None, use_curvature=True)
+        self.assertTrue(
+            _should_record_coordinate_history(
+                {"condition": "diag_curvature"}, optimizer
+            )
+        )
+        self.assertFalse(
+            _should_record_coordinate_history({"condition": "standard_es"}, optimizer)
+        )
+
+        optimizer.curvature_step_mode = "normalized"
+        self.assertFalse(
+            _should_record_coordinate_history(
+                {"condition": "diag_curvature"}, optimizer
+            )
+        )
+        optimizer.curvature_step_mode = "dampen"
+        optimizer.curvature_mode = "global"
+        self.assertFalse(
+            _should_record_coordinate_history(
+                {"condition": "diag_curvature"}, optimizer
+            )
+        )
 
     def test_raw_stein_diagonal_recovers_quadratic_curvature(self) -> None:
         rng = np.random.RandomState(7)

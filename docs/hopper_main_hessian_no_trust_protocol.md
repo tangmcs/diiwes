@@ -88,6 +88,44 @@ the upper bound of one. They should remain zero in this locked protocol because
 zero scalar damping and nonnegative projected curvature imply a raw multiplier
 no greater than one.
 
+Each diagonal run also writes two exact coordinate artifacts.
+`hessian_for_step_history.npy` stores the signed, bias-corrected Hessian vector
+actually used by the update, and `step_multiplier_history.npy` stores the final
+post-clipping multiplier applied to each gradient coordinate. Both are
+`float64` arrays with shape `(500, 5123)`, indexed by update and policy
+coordinate. For update `t`, reconstruct the intervention path as
+
+```text
+H[t]                       = hessian_for_step_history[t]
+c_pre[t]                   = maximum(-H[t], 0)
+c[t]                       = clip(c_pre[t], 0, curvature_clip)
+alpha[t]                   = alpha_0 / sqrt(t + 1)  or  alpha_0 / (t + 1)
+m_raw[t]                   = 1 / (1 + alpha[t] * c[t])
+m[t]                       = clip(m_raw[t], min_step_multiplier, 1)
+step_multiplier_history[t] = m[t]
+```
+
+Thus `c_pre[t] > curvature_clip` exactly reconstructs the upper-cap mask and
+`m_raw[t] < min_step_multiplier` exactly reconstructs the multiplier-floor
+mask. Equality is not an intervention. These formulas rely on this protocol's
+zero scalar damping and zero L2 coefficient; the saved signed Hessian and
+final multiplier remain the authoritative values.
+
+Each array has 20,492,000 bytes of numeric payload. With the 128-byte `.npy`
+header produced in this environment, that is 20,492,128 bytes per file and
+40,984,256 bytes per diagonal run. Across 40 diagonal runs, the exact projected
+increment is 1,639,370,240 bytes (1.639 GB, or 1.527 GiB).
+Standard ES runs do not create either coordinate array. Consumers should use
+memory mapping, for example `np.load(path, mmap_mode="r")`, when full in-memory
+loading is unnecessary.
+
+The coordinate arrays are preallocated and each completed update row is
+written and flushed incrementally. After an interruption, only the prefix
+corresponding to complete records in `history.jsonl` is eligible for diagnosis;
+the remaining preallocated rows are not observations and must be ignored. A
+valid completed run has all 500 coordinate rows plus the canonical
+`history.json`; interrupted artifacts cannot be promoted to a matrix cell.
+
 Counts and active flags can be summed to obtain exact clipped-coordinate
 events and active iterations across a run or the full matrix; fractions and
 pre-clipping excess/deficit values retain intervention prevalence and
